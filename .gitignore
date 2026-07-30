@@ -1,0 +1,15 @@
+node_modules
+out
+dist
+*.log
+.DS_Store
+
+# 敏感/构建产物/运行时文件
+*.pem
+*.crx
+*.err
+status.txt
+inst_status.txt
+
+# 内部数据（非源码）
+.codebuddy/

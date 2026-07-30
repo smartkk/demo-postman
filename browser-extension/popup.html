@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        width: 320px;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: #0f172a;
+        color: #e2e8f0;
+        padding: 14px;
+      }
+      h1 { font-size: 14px; margin: 0 0 12px; color: #38bdf8; }
+      .section { margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid #1e293b; }
+      .section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+      .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+      .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+      .switch input { width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer; }
+      label.field { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 6px; }
+      input.text, textarea.text {
+        width: 100%;
+        padding: 7px 9px;
+        border-radius: 8px;
+        border: 1px solid #334155;
+        background: #1e293b;
+        color: #e2e8f0;
+        font-size: 12px;
+        outline: none;
+        font-family: inherit;
+      }
+      textarea.text { resize: vertical; min-height: 46px; line-height: 1.5; }
+      input.text:focus, textarea.text:focus { border-color: #38bdf8; }
+      .hint { font-size: 11px; color: #64748b; margin: 8px 0 0; line-height: 1.5; }
+      .status { font-size: 11px; margin-top: 8px; padding: 6px 8px; border-radius: 6px; }
+      .status.on { background: rgba(16,185,129,.15); color: #34d399; }
+      .status.off { background: rgba(100,116,139,.15); color: #94a3b8; }
+      .stats { font-size: 12px; color: #cbd5e1; line-height: 1.7; }
+      .stats b { color: #38bdf8; }
+      .lasturl { font-size: 11px; color: #64748b; word-break: break-all; margin-top: 4px; }
+      .btn {
+        width: 100%;
+        padding: 8px;
+        border: none;
+        border-radius: 8px;
+        background: #0ea5e9;
+        color: #04141f;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 8px;
+      }
+      .btn:hover { background: #38bdf8; }
+      .btn.ghost { background: #1e293b; color: #94a3b8; }
+      .btn.ghost:hover { background: #334155; color: #e2e8f0; }
+      .addStatus { font-size: 11px; margin-top: 6px; min-height: 14px; }
+      .addStatus.ok { color: #34d399; }
+      .addStatus.err { color: #f87171; }
+      select.method {
+        padding: 7px 9px; border-radius: 8px; border: 1px solid #334155;
+        background: #1e293b; color: #e2e8f0; font-size: 12px; outline: none; margin-right: 6px;
+      }
+      .addRow { display: flex; gap: 6px; }
+      .addRow input { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <h1>Demo Postman 捕获</h1>
+
+    <div class="section">
+      <div class="row">
+        <label class="switch">
+          <input type="checkbox" id="enabled" />
+          <span>启用请求捕获</span>
+        </label>
+        <button class="btn ghost" id="clearCount" style="width:auto;margin:0;padding:5px 10px;">清空计数</button>
+      </div>
+      <div id="status" class="status off">未连接</div>
+    </div>
+
+    <div class="section">
+      <div class="stats">
+        本次会话已捕获：<b id="count">0</b> 条
+      </div>
+      <div class="lasturl" id="lastUrl">尚未捕获请求</div>
+    </div>
+
+    <div class="section">
+      <label class="field">接收端点（桌面端插件端点）</label>
+      <input class="text" id="endpoint" placeholder="http://127.0.0.1:8891" />
+    </div>
+
+    <div class="section">
+      <label class="field">过滤规则（减少噪音）</label>
+      <label class="switch" style="margin-bottom:8px;">
+        <input type="checkbox" id="excludeStatic" checked />
+        <span>跳过静态资源（图片/字体/脚本等）</span>
+      </label>
+      <label class="field">仅捕获这些主机（空=全部，支持 *.example.com，逗号/换行分隔）</label>
+      <textarea class="text" id="includeHosts" placeholder="例如：api.example.com&#10;*.myapp.com"></textarea>
+      <label class="field" style="margin-top:8px;">排除这些主机</label>
+      <textarea class="text" id="excludeHosts" placeholder="例如：analytics.google.com&#10;*.adservice.com"></textarea>
+    </div>
+
+    <div class="section">
+      <label class="field">手动添加请求到桌面端</label>
+      <div class="addRow">
+        <select class="method" id="addMethod">
+          <option>GET</option><option>POST</option><option>PUT</option>
+          <option>DELETE</option><option>PATCH</option><option>HEAD</option><option>OPTIONS</option>
+        </select>
+        <input class="text" id="addUrl" placeholder="https://api.example.com/users" />
+      </div>
+      <button class="btn" id="addBtn">添加到桌面端</button>
+      <div class="addStatus" id="addStatus"></div>
+    </div>
+
+    <p class="hint">
+      在桌面端开启「插件端点」后，本扩展会自动把浏览器发出的请求记录到 Demo
+      Postman。端点地址需与桌面端一致。
+    </p>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Demo Postman 捕获",
+  "version": "1.0.0",
+  "description": "将浏览器发出的 HTTP 请求自动发送到 Demo Postman 桌面端记录，按接口去重。",
+  "permissions": ["debugger", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Demo Postman 捕获"
+  }
+}
