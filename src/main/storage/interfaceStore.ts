@@ -452,6 +452,15 @@ export class InterfaceStore {
     this.emitChange();
   }
 
+  /** 记录接口最后一次「实际发送请求」的时间（仅更新该字段，不改动其它）。 */
+  setLastSent(id: string, at: string): void {
+    const r = this.records.get(id);
+    if (!r) return;
+    r.lastSentAt = at;
+    this.scheduleSave();
+    this.emitChange();
+  }
+
   /**
    * 浏览器插件在抓取请求后回传的响应结果：按 method+host+path 关联记录，
    * 写入 lastResponse（不累加 callCount，避免与请求捕获重复计数）。

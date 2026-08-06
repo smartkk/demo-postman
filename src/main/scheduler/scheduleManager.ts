@@ -118,12 +118,14 @@ export class ScheduleManager {
     const s = this.store.get(id);
     if (!s) return;
 
+    const firedAt = new Date().toISOString();
     try {
       const resp = await sendRequest(s.input);
       const result: ScheduleRunResult = {
         status: resp.status,
         statusText: resp.statusText,
         durationMs: resp.durationMs,
+        firedAt,
         at: resp.at,
       };
       this.store.recordResult(id, result);
@@ -133,6 +135,7 @@ export class ScheduleManager {
         statusText: '',
         durationMs: 0,
         error: err instanceof Error ? err.message : String(err),
+        firedAt,
         at: new Date().toISOString(),
       };
       this.store.recordResult(id, result);

@@ -5,6 +5,8 @@ import { DetailPanel } from './components/DetailPanel';
 import { ManualEntry } from './components/ManualEntry';
 import { SettingsPanel } from './components/SettingsPanel';
 import { SchedulePanel } from './components/SchedulePanel';
+import { BatchPanel } from './components/BatchPanel';
+import { ChainPanel } from './components/ChainPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { api } from './api/client';
 import { useInterfaces } from './store/useInterfaces';
@@ -31,6 +33,8 @@ export default function App() {
   });
   const [manualOpen, setManualOpen] = useState(false);
   const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [chainOpen, setChainOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settings, setSettings] = useState<CaptureSettings>({
     includeHosts: [],
@@ -116,6 +120,8 @@ export default function App() {
         onToggleExt={toggleExt}
         onManual={() => setManualOpen(true)}
         onSchedules={() => setSchedulesOpen(true)}
+        onBatch={() => setBatchOpen(true)}
+        onChain={() => setChainOpen(true)}
         onSettings={() => setSettingsOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
@@ -145,6 +151,8 @@ export default function App() {
           onClose={() => setSchedulesOpen(false)}
         />
       )}
+      {batchOpen && <BatchPanel onClose={() => setBatchOpen(false)} />}
+      {chainOpen && <ChainPanel onClose={() => setChainOpen(false)} />}
       {settingsOpen && (
         <SettingsPanel
           settings={settings}

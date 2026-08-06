@@ -1,7 +1,7 @@
-import { useState } from 'react';
-import { Copy, ServerCrash, Pencil, Check, X, Send, Trash2, Folder, Star, Ban } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Copy, ServerCrash, Check, X, Send, Trash2, Folder, Star, Ban } from 'lucide-react';
 import type { CaptureInput, InterfaceRecord, ResponseRecord } from '../../../shared/types';
-import { methodColor, relTime } from './method';
+import { relTime } from './method';
 import { api } from '../api/client';
 import { KeyValueEditor } from './KeyValueEditor';
 import { KVTable } from './KVTable';
@@ -52,7 +52,6 @@ function EmptyState() {
 
 export function DetailPanel({ record, store }: Props) {
   const [tab, setTab] = useState<Tab>('headers');
-  const [editing, setEditing] = useState(false);
   const [editMethod, setEditMethod] = useState('GET');
   const [editUrl, setEditUrl] = useState('');
   const [editHeaders, setEditHeaders] = useState<Record<string, string>>({});
@@ -71,26 +70,30 @@ export function DetailPanel({ record, store }: Props) {
   const [authUser, setAuthUser] = useState('');
   const [authPass, setAuthPass] = useState('');
 
-  if (!record) {
-    if (editing) setEditing(false);
-    return <main className="flex flex-1 bg-[#0F172A]"><EmptyState /></main>;
-  }
-
   const fullUrlOf = (r: InterfaceRecord) =>
     r.url +
     (Object.keys(r.query).length
       ? '?' + new URLSearchParams(r.query).toString()
       : '');
 
-  const startEdit = () => {
+  // 选中接口即进入可编辑状态：把记录同步到编辑字段（仅在切换记录时同步，避免输入时被覆盖）
+  const syncFromRecord = () => {
+    if (!record) return;
     setEditMethod(record.method);
     setEditUrl(fullUrlOf(record));
     setEditHeaders(record.headers);
     setEditQuery(record.query);
     setEditBody(record.body ?? '');
     setEditName(record.name || record.path);
-    setEditing(true);
   };
+  useEffect(() => {
+    syncFromRecord();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [record?.id]);
+
+  if (!record) {
+    return <main className="flex flex-1 bg-[#0F172A]"><EmptyState /></main>;
+  }
 
   const saveEdit = async () => {
     if (!editUrl.trim()) return;
@@ -112,11 +115,11 @@ export function DetailPanel({ record, store }: Props) {
       if (newName && newName !== (record.name || record.path)) {
         await store.rename(record.id, newName);
       }
-      setEditing(false);
     } finally {
       setSaving(false);
     }
   };
+
 
   const duplicate = async () => {
     setDuplicating(true);
@@ -133,32 +136,21 @@ export function DetailPanel({ record, store }: Props) {
   };
 
   const send = async () => {
-    const input: CaptureInput = editing
-      ? (() => {
-          const u = new URL(editUrl.trim());
-          for (const [k, v] of Object.entries(editQuery)) {
-            if (!u.searchParams.has(k)) u.searchParams.set(k, v);
-          }
-          return {
-            method: editMethod,
-            url: u.toString(),
-            headers: editHeaders,
-            body: editBody.trim() ? editBody : null,
-            contentType: editHeaders['content-type'] || null,
-          } as CaptureInput;
-        })()
-      : {
-          method: record.method,
-          url: fullUrlOf(record),
-          headers: record.headers,
-          body: record.body,
-          contentType: record.contentType,
-        };
+    const u = new URL(editUrl.trim());
+    for (const [k, v] of Object.entries(editQuery)) {
+      if (!u.searchParams.has(k)) u.searchParams.set(k, v);
+    }
+    const input: CaptureInput = {
+      method: editMethod,
+      url: u.toString(),
+      headers: editHeaders,
+      body: editBody.trim() ? editBody : null,
+      contentType: editHeaders['content-type'] || null,
+    };
     setSending(true);
     setSendError('');
     try {
       await api.sendRequest(record.id, input);
-      if (editing) setEditing(false);
       setHistoryIdx(null);
       setTab('response');
     } catch (e) {
@@ -175,20 +167,23 @@ export function DetailPanel({ record, store }: Props) {
   };
 
   const copyCurl = () => {
+    const u = new URL(editUrl.trim());
+    for (const [k, v] of Object.entries(editQuery)) {
+      if (!u.searchParams.has(k)) u.searchParams.set(k, v);
+    }
     const curl = buildCurl({
-      method: record.method,
-      url: fullUrlOf(record),
-      headers: record.headers,
-      query: record.query,
-      body: record.body,
-      contentType: record.contentType,
+      method: editMethod,
+      url: u.toString(),
+      headers: editHeaders,
+      query: editQuery,
+      body: editBody.trim() ? editBody : null,
+      contentType: editHeaders['content-type'] || null,
     });
     navigator.clipboard?.writeText(curl);
     setCurlCopied(true);
     setTimeout(() => setCurlCopied(false), 1500);
   };
 
-  const fullUrl = fullUrlOf(record);
   const history: ResponseRecord[] =
     record.responses && record.responses.length
       ? record.responses
@@ -212,138 +207,97 @@ export function DetailPanel({ record, store }: Props) {
   return (
     <main className="flex min-w-0 flex-1 flex-col bg-[#0F172A]">
       <div className="border-b border-slate-700/40 px-5 py-4">
-        {editing ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2.5">
-              <select
-                value={editMethod}
-                onChange={(e) => setEditMethod(e.target.value)}
-                className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[13px] outline-none focus:border-brand/60"
-              >
-                {METHODS.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-              <input
-                value={editUrl}
-                onChange={(e) => setEditUrl(e.target.value)}
-                placeholder="https://api.example.com/users"
-                className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-1.5 text-[13px] outline-none focus:border-brand/60"
-              />
-            </div>
-            <div className="flex justify-end gap-2">
-              <button
-                onClick={sending ? cancel : send}
-                disabled={!sending && !editUrl.trim()}
-                className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition cursor-pointer ${
-                  sending
-                    ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
-                    : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40'
-                }`}
-              >
-                {sending ? (
-                  <>
-                    <Ban size={13} /> 取消
-                  </>
-                ) : (
-                  <>
-                    <Send size={13} /> 发送
-                  </>
-                )}
-              </button>
-              <button
-                onClick={() => setEditing(false)}
-                className="flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:bg-slate-700/50 cursor-pointer"
-              >
-                <X size={13} /> 取消
-              </button>
-              <button
-                onClick={saveEdit}
-                disabled={!editUrl.trim() || saving}
-                className="flex items-center gap-1 rounded-lg bg-gradient-to-br from-brand to-brand-light px-3 py-1.5 text-[12.5px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
-              >
-                <Check size={13} /> 保存修改
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-2">
+        <div className="space-y-2">
           <div className="flex items-center gap-2.5">
-            <span
-              className={`rounded border px-2 py-0.5 text-[11px] font-semibold ${methodColor(
-                record.method
-              )}`}
+            <select
+              value={editMethod}
+              onChange={(e) => setEditMethod(e.target.value)}
+              className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[13px] outline-none focus:border-brand/60"
             >
-              {record.method}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[14px] font-medium text-slate-100">
-              {fullUrl}
-            </span>
+              {METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <input
+              value={editUrl}
+              onChange={(e) => setEditUrl(e.target.value)}
+              placeholder="https://api.example.com/users"
+              className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-1.5 text-[13px] outline-none focus:border-brand/60"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={sending ? cancel : send}
-              disabled={false}
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition cursor-pointer ${
+              disabled={!sending && !editUrl.trim()}
+              className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition cursor-pointer ${
                 sending
                   ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
-                  : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                  : 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 disabled:opacity-40'
               }`}
             >
               {sending ? (
                 <>
-                  <Ban size={12} /> 取消
+                  <Ban size={13} /> 取消
                 </>
               ) : (
                 <>
-                  <Send size={12} /> 发送
+                  <Send size={13} /> 发送
                 </>
               )}
             </button>
             <button
-              onClick={() => copy(fullUrl)}
-              className="flex items-center gap-1 rounded-md bg-slate-800/50 px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
+              onClick={() => copy(editUrl)}
+              className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 cursor-pointer"
             >
-              <Copy size={12} /> 复制
+              <Copy size={13} /> 复制
             </button>
             <button
               onClick={copyCurl}
-              className="flex items-center gap-1 rounded-md bg-slate-800/50 px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 cursor-pointer"
             >
-              {curlCopied ? <Check size={12} /> : <Copy size={12} />}
+              {curlCopied ? <Check size={13} /> : <Copy size={13} />}
               {curlCopied ? '已复制' : 'cURL'}
-            </button>
-            <button
-              onClick={startEdit}
-              className="flex items-center gap-1 rounded-md bg-slate-800/50 px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
-            >
-              <Pencil size={12} /> 编辑
             </button>
             <button
               onClick={() => store.togglePin(record.id)}
               title={record.pinned ? '取消收藏' : '收藏置顶'}
-              className={`flex items-center gap-1 rounded-md px-2 py-1 text-[11px] transition cursor-pointer ${
+              className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] transition cursor-pointer ${
                 record.pinned
                   ? 'bg-amber-500/15 text-amber-300'
-                  : 'bg-slate-800/50 text-slate-400 hover:text-slate-200'
+                  : 'bg-slate-800/50 text-slate-300 hover:text-slate-100'
               }`}
             >
-              <Star size={12} fill={record.pinned ? 'currentColor' : 'none'} />
+              <Star size={13} fill={record.pinned ? 'currentColor' : 'none'} />
             </button>
             <button
               onClick={duplicate}
               disabled={duplicating}
               title="复制接口"
-              className="flex items-center gap-1 rounded-md bg-slate-800/50 px-2 py-1 text-[11px] text-slate-400 transition hover:text-slate-200 disabled:opacity-40 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 disabled:opacity-40 cursor-pointer"
             >
-              <Copy size={12} /> 复制
+              <Copy size={13} /> 复制接口
             </button>
             <button
               onClick={() => setConfirmDelete(true)}
               title="删除接口"
-              className="flex items-center gap-1 rounded-md bg-slate-800/50 px-2 py-1 text-[11px] text-rose-400/80 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
+              className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-rose-400/80 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
             >
-              <Trash2 size={12} /> 删除
+              <Trash2 size={13} /> 删除
+            </button>
+            <button
+              onClick={saveEdit}
+              disabled={!editUrl.trim() || saving}
+              className="flex items-center gap-1 rounded-lg bg-gradient-to-br from-brand to-brand-light px-3 py-1.5 text-[12.5px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+            >
+              <Check size={13} /> 保存修改
+            </button>
+            <button
+              onClick={syncFromRecord}
+              className="flex items-center gap-1 rounded-lg bg-slate-700/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+            >
+              <X size={13} /> 重置
             </button>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
@@ -370,12 +324,28 @@ export function DetailPanel({ record, store }: Props) {
               {record.source === 'manual' ? '手动创建' : '浏览器抓取'}
             </span>
           </div>
-          </div>
-        )}
+        </div>
       </div>
 
-      {editing ? (
-        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-5">
+      <div className="flex gap-1 border-b border-slate-700/40 px-5">
+        {tabs.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`relative px-3 py-2 text-[12.5px] font-medium transition cursor-pointer ${
+              tab === t.key ? 'text-brand-light' : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {t.label}
+            {tab === t.key && (
+              <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-brand" />
+            )}
+          </button>
+        ))}
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+        <div className="space-y-4">
           <Section title="名称（可选，留空则用路径）">
             <input
               value={editName}
@@ -384,171 +354,147 @@ export function DetailPanel({ record, store }: Props) {
               className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[12.5px] outline-none focus:border-brand/60"
             />
           </Section>
-          <Section title="Headers">
-            <KeyValueEditor value={editHeaders} onChange={setEditHeaders} />
-          </Section>
-          <Section title="Query 参数">
-            <KeyValueEditor
-              value={editQuery}
-              onChange={setEditQuery}
-              placeholderKey="param"
-            />
-          </Section>
-          <Section
-            title="Body"
-            action={
-              <button
-                onClick={() => {
-                  const p = tryPrettyJson(editBody);
-                  if (p) setEditBody(p);
-                }}
-                className="rounded-md bg-slate-800/50 px-2 py-0.5 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
-              >
-                格式化 JSON
-              </button>
-            }
-          >
-            <textarea
-              value={editBody}
-              onChange={(e) => setEditBody(e.target.value)}
-              rows={6}
-              placeholder='{
+          {tab === 'headers' && (
+            <>
+              <Section title="Headers">
+                <KeyValueEditor value={editHeaders} onChange={setEditHeaders} />
+              </Section>
+              <Section title="鉴权（自动写入 Authorization 头）">
+                <div className="space-y-2">
+                  <select
+                    value={authType}
+                    onChange={(e) => {
+                      const t = e.target.value as typeof authType;
+                      setAuthType(t);
+                      if (t === 'none') {
+                        const h = { ...editHeaders };
+                        delete h['authorization'];
+                        setEditHeaders(h);
+                      }
+                    }}
+                    className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[12.5px] outline-none focus:border-brand/60 cursor-pointer"
+                  >
+                    <option value="none">无</option>
+                    <option value="bearer">Bearer Token</option>
+                    <option value="basic">Basic Auth</option>
+                  </select>
+                  {authType === 'bearer' && (
+                    <input
+                      value={authToken}
+                      onChange={(e) => {
+                        setAuthToken(e.target.value);
+                        setEditHeaders((h) => ({
+                          ...h,
+                          authorization: `Bearer ${e.target.value}`,
+                        }));
+                      }}
+                      placeholder="粘贴 token"
+                      className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 font-mono text-[12.5px] outline-none focus:border-brand/60"
+                    />
+                  )}
+                  {authType === 'basic' && (
+                    <div className="flex gap-2">
+                      <input
+                        value={authUser}
+                        onChange={(e) => {
+                          setAuthUser(e.target.value);
+                          setEditHeaders((h) => ({
+                            ...h,
+                            authorization:
+                              'Basic ' + btoa(`${e.target.value}:${authPass}`),
+                          }));
+                        }}
+                        placeholder="用户名"
+                        className="flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[12.5px] outline-none focus:border-brand/60"
+                      />
+                      <input
+                        value={authPass}
+                        type="password"
+                        onChange={(e) => {
+                          setAuthPass(e.target.value);
+                          setEditHeaders((h) => ({
+                            ...h,
+                            authorization:
+                              'Basic ' + btoa(`${authUser}:${e.target.value}`),
+                          }));
+                        }}
+                        placeholder="密码"
+                        className="flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[12.5px] outline-none focus:border-brand/60"
+                      />
+                    </div>
+                  )}
+                </div>
+              </Section>
+            </>
+          )}
+          {tab === 'query' && (
+            <Section title="Query 参数">
+              <KeyValueEditor
+                value={editQuery}
+                onChange={setEditQuery}
+                placeholderKey="param"
+              />
+            </Section>
+          )}
+          {tab === 'params' && <ParamsView record={record} />}
+          {tab === 'body' && (
+            <Section
+              title="Body"
+              action={
+                <button
+                  onClick={() => {
+                    const p = tryPrettyJson(editBody);
+                    if (p) setEditBody(p);
+                  }}
+                  className="rounded-md bg-slate-800/50 px-2 py-0.5 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
+                >
+                  格式化 JSON
+                </button>
+              }
+            >
+              <textarea
+                value={editBody}
+                onChange={(e) => setEditBody(e.target.value)}
+                rows={6}
+                placeholder='{
   "key": "value"
 }'
-              className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 font-mono text-[12.5px] outline-none focus:border-brand/60"
-            />
-          </Section>
-          <Section title="鉴权（自动写入 Authorization 头）">
-            <div className="space-y-2">
-              <select
-                value={authType}
-                onChange={(e) => {
-                  const t = e.target.value as typeof authType;
-                  setAuthType(t);
-                  if (t === 'none') {
-                    const h = { ...editHeaders };
-                    delete h['authorization'];
-                    setEditHeaders(h);
-                  }
-                }}
-                className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[12.5px] outline-none focus:border-brand/60 cursor-pointer"
-              >
-                <option value="none">无</option>
-                <option value="bearer">Bearer Token</option>
-                <option value="basic">Basic Auth</option>
-              </select>
-              {authType === 'bearer' && (
-                <input
-                  value={authToken}
-                  onChange={(e) => {
-                    setAuthToken(e.target.value);
-                    setEditHeaders((h) => ({
-                      ...h,
-                      authorization: `Bearer ${e.target.value}`,
-                    }));
-                  }}
-                  placeholder="粘贴 token"
-                  className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 font-mono text-[12.5px] outline-none focus:border-brand/60"
-                />
-              )}
-              {authType === 'basic' && (
-                <div className="flex gap-2">
-                  <input
-                    value={authUser}
-                    onChange={(e) => {
-                      setAuthUser(e.target.value);
-                      setEditHeaders((h) => ({
-                        ...h,
-                        authorization:
-                          'Basic ' +
-                          btoa(`${e.target.value}:${authPass}`),
-                      }));
-                    }}
-                    placeholder="用户名"
-                    className="flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[12.5px] outline-none focus:border-brand/60"
-                  />
-                  <input
-                    value={authPass}
-                    type="password"
-                    onChange={(e) => {
-                      setAuthPass(e.target.value);
-                      setEditHeaders((h) => ({
-                        ...h,
-                        authorization:
-                          'Basic ' +
-                          btoa(`${authUser}:${e.target.value}`),
-                      }));
-                    }}
-                    placeholder="密码"
-                    className="flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[12.5px] outline-none focus:border-brand/60"
-                  />
+                className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 font-mono text-[12.5px] outline-none focus:border-brand/60"
+              />
+            </Section>
+          )}
+          {tab === 'response' && (
+            <>
+              {history.length > 1 && (
+                <div className="mb-3 flex items-center gap-2 text-[11.5px] text-slate-500">
+                  <span>历史响应</span>
+                  <select
+                    value={activeIdx}
+                    onChange={(e) => setHistoryIdx(Number(e.target.value))}
+                    className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11.5px] text-slate-300 outline-none focus:border-brand/60 cursor-pointer"
+                  >
+                    {history
+                      .map((r, i) => ({ r, i }))
+                      .reverse()
+                      .map(({ r, i }) => (
+                        <option key={i} value={i}>
+                          #{history.length - i} · {r.status || '失败'} ·{' '}
+                          {relTime(r.at)}
+                        </option>
+                      ))}
+                  </select>
                 </div>
               )}
-            </div>
-          </Section>
+              <ResponseView response={displayResponse} error={sendError} />
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          <div className="flex gap-1 border-b border-slate-700/40 px-5">
-            {tabs.map((t) => (
-              <button
-                key={t.key}
-                onClick={() => setTab(t.key)}
-                className={`relative px-3 py-2 text-[12.5px] font-medium transition cursor-pointer ${
-                  tab === t.key ? 'text-brand-light' : 'text-slate-500 hover:text-slate-300'
-                }`}
-              >
-                {t.label}
-                {tab === t.key && (
-                  <span className="absolute inset-x-2 -bottom-px h-0.5 rounded bg-brand" />
-                )}
-              </button>
-            ))}
-          </div>
+      </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
-            {tab === 'headers' && <KVTable data={record.headers} />}
-            {tab === 'query' && <KVTable data={record.query} />}
-            {tab === 'params' && <ParamsView record={record} />}
-            {tab === 'body' && (
-              <BodyView
-                body={record.body}
-                contentType={record.contentType}
-                emptyHint="该请求无 Body"
-              />
-            )}
-            {tab === 'response' && (
-              <>
-                {history.length > 1 && (
-                  <div className="mb-3 flex items-center gap-2 text-[11.5px] text-slate-500">
-                    <span>历史响应</span>
-                    <select
-                      value={activeIdx}
-                      onChange={(e) => setHistoryIdx(Number(e.target.value))}
-                      className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11.5px] text-slate-300 outline-none focus:border-brand/60 cursor-pointer"
-                    >
-                      {history
-                        .map((r, i) => ({ r, i }))
-                        .reverse()
-                        .map(({ r, i }) => (
-                          <option key={i} value={i}>
-                            #{history.length - i} · {r.status || '失败'} ·{' '}
-                            {relTime(r.at)}
-                          </option>
-                        ))}
-                    </select>
-                  </div>
-                )}
-                <ResponseView response={displayResponse} error={sendError} />
-              </>
-            )}
-          </div>
-        </>
-      )}
-
-      <div className="grid grid-cols-3 gap-3 border-t border-slate-700/40 px-5 py-3 text-[11.5px]">
+      <div className="grid grid-cols-4 gap-3 border-t border-slate-700/40 px-5 py-3 text-[11.5px]">
         <Stat label="调用次数" value={String(record.callCount)} />
         <Stat label="创建时间" value={relTime(record.createdAt)} />
+        <Stat label="最近发送" value={record.lastSentAt ? relTime(record.lastSentAt) : '—'} />
         <Stat label="最近更新" value={relTime(record.lastUpdated)} />
       </div>
 

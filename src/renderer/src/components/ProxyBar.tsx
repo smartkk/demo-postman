@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Clipboard, Network, Sun, Moon, Clock } from 'lucide-react';
+import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Clipboard, Network, Sun, Moon, Clock, Layers, GitBranch } from 'lucide-react';
 import type { ExtensionStatus, ProxyStatus } from '../../../shared/types';
 import { api } from '../api/client';
 
@@ -10,6 +10,8 @@ interface Props {
   onToggleExt: () => void;
   onManual: () => void;
   onSchedules: () => void;
+  onBatch: () => void;
+  onChain: () => void;
   onSettings: () => void;
 }
 
@@ -20,6 +22,8 @@ export function ProxyBar({
   onToggleExt,
   onManual,
   onSchedules,
+  onBatch,
+  onChain,
   onSettings,
 }: Props) {
   const [caOpen, setCaOpen] = useState(false);
@@ -124,6 +128,22 @@ export function ProxyBar({
           className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
         >
           <Clock size={15} /> 定时
+        </button>
+
+        <button
+          onClick={onBatch}
+          title="批量调用：同一接口用不同参数批量请求"
+          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+        >
+          <Layers size={15} /> 批量
+        </button>
+
+        <button
+          onClick={onChain}
+          title="链式请求：多接口按顺序串联，上一步响应作为参数传给下一步"
+          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+        >
+          <GitBranch size={15} /> 链式
         </button>
 
         <button

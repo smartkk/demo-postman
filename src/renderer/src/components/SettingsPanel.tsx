@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X, Filter, FolderTree, Layers, Plus } from 'lucide-react';
 import type { CaptureSettings } from '../../../shared/types';
+import { api } from '../api/client';
 
 /** 将逗号/换行分隔的字符串解析为过滤规则数组（与 main 端保持一致）。 */
 function parseList(v: string): string[] {
@@ -51,19 +52,77 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
     onChange({ excludeHosts: parseList(v) });
   };
 
+  // 环境变量文本用本地状态受控，避免「输入行缺少 = 时被 parseEnv 清空」导致无法编辑；
+  // 仅在切换环境时从 props 重新同步。
+  const [envText, setEnvText] = useState(stringifyEnv(activeVars));
+  useEffect(() => {
+    setEnvText(stringifyEnv(activeVars));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeEnv]);
   const commitEnvText = (text: string) => {
+    setEnvText(text);
     onChange({
       environments: { ...environments, [activeEnv]: parseEnv(text) },
     });
   };
 
+  // ── 环境变量：内联新增（避免依赖被禁用的 window.prompt） ──
+  const [addingEnv, setAddingEnv] = useState(false);
+  const [newEnvName, setNewEnvName] = useState('');
   const addEnv = () => {
-    const name = window.prompt('新环境名称');
-    if (name && name.trim() && !environments[name.trim()]) {
+    setAddingEnv(true);
+    setNewEnvName('');
+  };
+  const confirmAddEnv = () => {
+    const name = newEnvName.trim();
+    if (name && !environments[name]) {
       onChange({
-        environments: { ...environments, [name.trim()]: {} },
-        activeEnv: name.trim(),
+        environments: { ...environments, [name]: {} },
+        activeEnv: name,
       });
+    }
+    setAddingEnv(false);
+    setNewEnvName('');
+  };
+
+  // ── 文件保存位置 ──
+  const [dataDir, setDataDir] = useState('');
+  const [dirMsg, setDirMsg] = useState('');
+  useEffect(() => {
+    // 防御：若运行的是旧构建（preload 未暴露 getDataDir），跳过而非崩溃
+    if (typeof window.api?.getDataDir === 'function') {
+      window.api.getDataDir().then(setDataDir).catch(() => {});
+    }
+  }, []);
+  const chooseDataDir = async () => {
+    try {
+      const picked = await api.chooseDataDir();
+      if (!picked) return;
+      const ok = await api.setDataDir(picked);
+      if (ok) {
+        setDataDir(picked);
+        setDirMsg('已设置，请点击「重启应用」使新位置生效（数据会自动迁移）。');
+      } else {
+        setDirMsg('该目录无效或无写入权限，请重新选择。');
+      }
+    } catch {
+      setDirMsg('操作失败，请重试。');
+    }
+  };
+  const resetDataDir = async () => {
+    try {
+      await api.setDataDir('');
+      setDataDir('');
+      setDirMsg('已恢复默认位置，请点击「重启应用」生效。');
+    } catch {
+      setDirMsg('操作失败，请重试。');
+    }
+  };
+  const relaunchApp = async () => {
+    try {
+      await api.relaunch();
+    } catch {
+      /* noop */
     }
   };
 
@@ -168,12 +227,46 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
               <span className="flex items-center gap-1.5 text-[13px] font-medium text-slate-200">
                 <Layers size={13} className="text-brand-light" /> 环境变量
               </span>
-              <button
-                onClick={addEnv}
-                className="flex items-center gap-1 rounded-md bg-slate-700/50 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
-              >
-                <Plus size={12} /> 新增环境
-              </button>
+              {addingEnv ? (
+                <div className="flex items-center gap-1.5">
+                  <input
+                    autoFocus
+                    value={newEnvName}
+                    onChange={(e) => setNewEnvName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') confirmAddEnv();
+                      if (e.key === 'Escape') {
+                        setAddingEnv(false);
+                        setNewEnvName('');
+                      }
+                    }}
+                    placeholder="环境名称"
+                    className="w-28 rounded-md border border-slate-700/50 bg-slate-800/60 px-2 py-1 text-[11px] text-slate-200 outline-none transition focus:border-brand/60"
+                  />
+                  <button
+                    onClick={confirmAddEnv}
+                    className="rounded-md bg-brand/80 px-2 py-1 text-[11px] text-white transition hover:bg-brand cursor-pointer"
+                  >
+                    确定
+                  </button>
+                  <button
+                    onClick={() => {
+                      setAddingEnv(false);
+                      setNewEnvName('');
+                    }}
+                    className="rounded-md bg-slate-700/50 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+                  >
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={addEnv}
+                  className="flex items-center gap-1 rounded-md bg-slate-700/50 px-2 py-1 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+                >
+                  <Plus size={12} /> 新增环境
+                </button>
+              )}
             </div>
             <div className="mb-2 flex flex-wrap gap-1.5">
               {Object.keys(environments).map((name) => (
@@ -195,11 +288,46 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
               <code className="text-slate-300">{'{{key}}'}</code> 引用）：
             </p>
             <textarea
-              value={stringifyEnv(activeVars)}
+              value={envText}
               onChange={(e) => commitEnvText(e.target.value)}
               placeholder={'baseUrl=https://api.example.com\ntoken=xxx'}
               className="h-[88px] w-full resize-none rounded-lg border border-slate-700/50 bg-slate-800/40 p-2.5 font-mono text-[12px] text-slate-200 outline-none transition focus:border-brand/60"
             />
+          </div>
+
+          <div className="rounded-xl bg-slate-800/40 p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-slate-200">
+              <FolderTree size={13} className="text-brand-light" /> 文件保存位置
+            </div>
+            <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+              接口记录、定时任务与设置将保存在此目录。修改后需重启应用，现有数据会自动迁移到新位置。
+            </p>
+            <div className="mb-2 break-all rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 text-[11px] text-slate-300">
+              {dataDir || '（默认：应用数据目录）'}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={chooseDataDir}
+                className="rounded-md bg-slate-700/50 px-2.5 py-1 text-[11px] text-slate-200 transition hover:bg-slate-700 cursor-pointer"
+              >
+                选择文件夹
+              </button>
+              <button
+                onClick={resetDataDir}
+                className="rounded-md bg-slate-700/50 px-2.5 py-1 text-[11px] text-slate-200 transition hover:bg-slate-700 cursor-pointer"
+              >
+                恢复默认
+              </button>
+              <button
+                onClick={relaunchApp}
+                className="rounded-md bg-brand/80 px-2.5 py-1 text-[11px] text-white transition hover:bg-brand cursor-pointer"
+              >
+                重启应用
+              </button>
+            </div>
+            {dirMsg && (
+              <p className="mt-2 text-[11px] text-amber-400/90">{dirMsg}</p>
+            )}
           </div>
 
           <p className="rounded-lg bg-slate-800/30 p-2.5 text-[11px] leading-relaxed text-slate-500">

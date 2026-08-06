@@ -407,7 +407,7 @@ export function SchedulePanel({ records, onClose }: Props) {
                               <thead>
                                 <tr className="border-b border-slate-700/50 text-slate-400">
                                   <th className="py-1.5 pr-2 text-left font-medium">#</th>
-                                  <th className="py-1.5 pr-3 text-left font-medium">时间</th>
+                                  <th className="py-1.5 pr-3 text-left font-medium">执行时间</th>
                                   <th className="py-1.5 pr-3 text-left font-medium">状态</th>
                                   <th className="py-1.5 pr-3 text-right font-medium">耗时</th>
                                   <th className="py-1.5 text-left font-medium">详情</th>
@@ -424,8 +424,8 @@ export function SchedulePanel({ records, onClose }: Props) {
                                       <td className="py-1.5 pr-2 text-slate-300">
                                         {displayHistory.length - i}
                                       </td>
-                                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-400">
-                                        {formatTime(r.at)}
+                                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-400" title={`响应完成：${formatTime(r.at)}`}>
+                                        {formatTime(r.firedAt || r.at)}
                                       </td>
                                       <td className="py-1.5 pr-3">
                                         <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${stBadge.cls}`}>

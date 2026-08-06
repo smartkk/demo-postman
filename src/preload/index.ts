@@ -1,7 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  BatchCallInput,
+  BatchCallResult,
+  BatchProject,
   CaptureInput,
   CaptureSettings,
+  ChainProject,
+  ChainRunResult,
   ExtensionStatus,
   InterfaceRecord,
   ProxyStatus,
@@ -39,6 +44,60 @@ const api = {
     ipcRenderer.invoke('request:send', id, input),
   cancelRequest: (id: string): Promise<void> =>
     ipcRenderer.invoke('request:cancel', id),
+  batchSend: (input: BatchCallInput): Promise<BatchCallResult[]> =>
+    ipcRenderer.invoke('request:batchSend', input),
+  listBatches: (): Promise<BatchProject[]> =>
+    ipcRenderer.invoke('batch:list'),
+  saveBatch: (project: BatchProject): Promise<BatchProject> =>
+    ipcRenderer.invoke('batch:save', project),
+  deleteBatch: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('batch:delete', id),
+  renameBatch: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('batch:rename', id, name),
+  moveBatchFolder: (id: string, folder: string): Promise<void> =>
+    ipcRenderer.invoke('batch:moveFolder', id, folder),
+  runBatch: (id: string): Promise<BatchCallResult[]> =>
+    ipcRenderer.invoke('batch:run', id),
+  listBatchFolders: (): Promise<string[]> =>
+    ipcRenderer.invoke('batch:folders'),
+  createBatchFolder: (name: string): Promise<void> =>
+    ipcRenderer.invoke('batch:createFolder', name),
+  deleteBatchFolder: (name: string): Promise<void> =>
+    ipcRenderer.invoke('batch:deleteFolder', name),
+  listChains: (): Promise<ChainProject[]> =>
+    ipcRenderer.invoke('chain:list'),
+  saveChain: (project: ChainProject): Promise<ChainProject> =>
+    ipcRenderer.invoke('chain:save', project),
+  deleteChain: (id: string): Promise<boolean> =>
+    ipcRenderer.invoke('chain:delete', id),
+  renameChain: (id: string, name: string): Promise<void> =>
+    ipcRenderer.invoke('chain:rename', id, name),
+  moveChainFolder: (id: string, folder: string): Promise<void> =>
+    ipcRenderer.invoke('chain:moveFolder', id, folder),
+  runChain: (id: string): Promise<ChainRunResult[]> =>
+    ipcRenderer.invoke('chain:run', id),
+  listChainFolders: (): Promise<string[]> =>
+    ipcRenderer.invoke('chain:folders'),
+  createChainFolder: (name: string): Promise<void> =>
+    ipcRenderer.invoke('chain:createFolder', name),
+  deleteChainFolder: (name: string): Promise<void> =>
+    ipcRenderer.invoke('chain:deleteFolder', name),
+  onChains: (
+    cb: (list: ChainProject[], folders: string[]) => void
+  ): (() => void) => {
+    const handler = (_e: unknown, list: ChainProject[], folders: string[]) =>
+      cb(list, folders);
+    ipcRenderer.on('chain:updated', handler);
+    return () => ipcRenderer.removeListener('chain:updated', handler);
+  },
+  onBatches: (
+    cb: (list: BatchProject[], folders: string[]) => void
+  ): (() => void) => {
+    const handler = (_e: unknown, list: BatchProject[], folders: string[]) =>
+      cb(list, folders);
+    ipcRenderer.on('batch:updated', handler);
+    return () => ipcRenderer.removeListener('batch:updated', handler);
+  },
   exportCollection: (): Promise<unknown> =>
     ipcRenderer.invoke('collection:export'),
   importCollection: (data: unknown): Promise<boolean> =>
@@ -59,6 +118,12 @@ const api = {
     ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<CaptureSettings>): Promise<CaptureSettings> =>
     ipcRenderer.invoke('settings:set', patch),
+  getDataDir: (): Promise<string> => ipcRenderer.invoke('app:getDataDir'),
+  chooseDataDir: (): Promise<string | null> =>
+    ipcRenderer.invoke('app:chooseDataDir'),
+  setDataDir: (dir: string): Promise<boolean> =>
+    ipcRenderer.invoke('app:setDataDir', dir),
+  relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
   onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void): void => {
     ipcRenderer.on('store:updated', (_e, list, folders) => cb(list, folders));
   },

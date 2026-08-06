@@ -1,6 +1,11 @@
 import type {
+  BatchCallInput,
+  BatchCallResult,
+  BatchProject,
   CaptureInput,
   CaptureSettings,
+  ChainProject,
+  ChainRunResult,
   ExtensionStatus,
   InterfaceRecord,
   ProxyStatus,
@@ -33,6 +38,36 @@ export const api = {
   sendRequest: (id: string, input: CaptureInput): Promise<ResponseRecord | null> =>
     window.api.sendRequest(id, input),
   cancelRequest: (id: string): Promise<void> => window.api.cancelRequest(id),
+  batchSend: (input: BatchCallInput): Promise<BatchCallResult[]> =>
+    window.api.batchSend(input),
+  listBatches: (): Promise<BatchProject[]> => window.api.listBatches(),
+  saveBatch: (project: BatchProject): Promise<BatchProject> =>
+    window.api.saveBatch(project),
+  deleteBatch: (id: string): Promise<boolean> => window.api.deleteBatch(id),
+  renameBatch: (id: string, name: string): Promise<void> =>
+    window.api.renameBatch(id, name),
+  moveBatchFolder: (id: string, folder: string): Promise<void> =>
+    window.api.moveBatchFolder(id, folder),
+  runBatch: (id: string): Promise<BatchCallResult[]> => window.api.runBatch(id),
+  listBatchFolders: (): Promise<string[]> => window.api.listBatchFolders(),
+  createBatchFolder: (name: string): Promise<void> =>
+    window.api.createBatchFolder(name),
+  deleteBatchFolder: (name: string): Promise<void> =>
+    window.api.deleteBatchFolder(name),
+  listChains: (): Promise<ChainProject[]> => window.api.listChains(),
+  saveChain: (project: ChainProject): Promise<ChainProject> =>
+    window.api.saveChain(project),
+  deleteChain: (id: string): Promise<boolean> => window.api.deleteChain(id),
+  renameChain: (id: string, name: string): Promise<void> =>
+    window.api.renameChain(id, name),
+  moveChainFolder: (id: string, folder: string): Promise<void> =>
+    window.api.moveChainFolder(id, folder),
+  runChain: (id: string): Promise<ChainRunResult[]> => window.api.runChain(id),
+  listChainFolders: (): Promise<string[]> => window.api.listChainFolders(),
+  createChainFolder: (name: string): Promise<void> =>
+    window.api.createChainFolder(name),
+  deleteChainFolder: (name: string): Promise<void> =>
+    window.api.deleteChainFolder(name),
   exportCollection: (): Promise<unknown> => window.api.exportCollection(),
   importCollection: (data: unknown): Promise<boolean> =>
     window.api.importCollection(data),
@@ -49,6 +84,11 @@ export const api = {
   getSettings: (): Promise<CaptureSettings> => window.api.getSettings(),
   setSettings: (patch: Partial<CaptureSettings>): Promise<CaptureSettings> =>
     window.api.setSettings(patch),
+  /* ── 文件保存位置 ── */
+  getDataDir: (): Promise<string> => window.api.getDataDir(),
+  chooseDataDir: (): Promise<string | null> => window.api.chooseDataDir(),
+  setDataDir: (dir: string): Promise<boolean> => window.api.setDataDir(dir),
+  relaunch: (): Promise<void> => window.api.relaunch(),
   onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void) =>
     window.api.onUpdated(cb),
   onProxyStatus: (cb: (s: ProxyStatus) => void) => window.api.onProxyStatus(cb),
@@ -67,6 +107,12 @@ export const api = {
     window.api.getScheduleHistory(id),
   onSchedules: (cb: (list: ScheduleConfig[]) => void) =>
     window.api.onSchedules(cb),
+  onBatches: (
+    cb: (list: BatchProject[], folders: string[]) => void
+  ) => window.api.onBatches(cb),
+  onChains: (
+    cb: (list: ChainProject[], folders: string[]) => void
+  ) => window.api.onChains(cb),
 };
 
 declare global {
@@ -87,6 +133,16 @@ declare global {
       deleteFolder: (name: string) => Promise<void>;
       sendRequest: (id: string, input: CaptureInput) => Promise<ResponseRecord | null>;
       cancelRequest: (id: string) => Promise<void>;
+      batchSend: (input: BatchCallInput) => Promise<BatchCallResult[]>;
+      listBatches: () => Promise<BatchProject[]>;
+      saveBatch: (project: BatchProject) => Promise<BatchProject>;
+      deleteBatch: (id: string) => Promise<boolean>;
+      renameBatch: (id: string, name: string) => Promise<void>;
+      moveBatchFolder: (id: string, folder: string) => Promise<void>;
+      runBatch: (id: string) => Promise<BatchCallResult[]>;
+      listBatchFolders: () => Promise<string[]>;
+      createBatchFolder: (name: string) => Promise<void>;
+      deleteBatchFolder: (name: string) => Promise<void>;
       exportCollection: () => Promise<unknown>;
       importCollection: (data: unknown) => Promise<boolean>;
       clearAll: () => Promise<boolean>;
@@ -99,6 +155,10 @@ declare global {
       toggleExtension: () => Promise<ExtensionStatus>;
       getSettings: () => Promise<CaptureSettings>;
       setSettings: (patch: Partial<CaptureSettings>) => Promise<CaptureSettings>;
+      getDataDir: () => Promise<string>;
+      chooseDataDir: () => Promise<string | null>;
+      setDataDir: (dir: string) => Promise<boolean>;
+      relaunch: () => Promise<void>;
       onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void) => void;
       onProxyStatus: (cb: (s: ProxyStatus) => void) => void;
       onExtensionStatus: (cb: (s: ExtensionStatus) => void) => void;
@@ -110,6 +170,18 @@ declare global {
       toggleSchedule: (id: string) => Promise<ScheduleConfig | undefined>;
       getScheduleHistory: (id: string) => Promise<ScheduleConfig['history']>;
       onSchedules: (cb: (list: ScheduleConfig[]) => void) => void;
+      onBatches: (cb: (list: BatchProject[], folders: string[]) => void) => () => void;
+      /* ── 链式请求 ── */
+      listChains: () => Promise<ChainProject[]>;
+      saveChain: (project: ChainProject) => Promise<ChainProject>;
+      deleteChain: (id: string) => Promise<boolean>;
+      renameChain: (id: string, name: string) => Promise<void>;
+      moveChainFolder: (id: string, folder: string) => Promise<void>;
+      runChain: (id: string) => Promise<ChainRunResult[]>;
+      listChainFolders: () => Promise<string[]>;
+      createChainFolder: (name: string) => Promise<void>;
+      deleteChainFolder: (name: string) => Promise<void>;
+      onChains: (cb: (list: ChainProject[], folders: string[]) => void) => () => void;
     };
   }
 }
