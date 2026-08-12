@@ -7,7 +7,7 @@ import { KeyValueEditor } from './KeyValueEditor';
 import { KVTable } from './KVTable';
 import { BodyView } from './BodyView';
 import { ConfirmDialog } from './ConfirmDialog';
-import { tryPrettyJson, buildCurl, detectKind, parseFormUrlEncoded } from '../lib/format';
+import { tryPrettyJson, buildCurl, detectKind, parseFormUrlEncoded, friendlyError } from '../lib/format';
 
 interface Props {
   record: InterfaceRecord | null;
@@ -69,6 +69,22 @@ export function DetailPanel({ record, store }: Props) {
   const [authToken, setAuthToken] = useState('');
   const [authUser, setAuthUser] = useState('');
   const [authPass, setAuthPass] = useState('');
+  const [urlError, setUrlError] = useState('');
+
+  // 实时校验编辑中的 URL，避免发送/保存时 new URL() 抛错导致界面崩溃。
+  const handleEditUrl = (text: string) => {
+    setEditUrl(text);
+    if (!text.trim()) {
+      setUrlError('');
+      return;
+    }
+    try {
+      new URL(text.trim());
+      setUrlError('');
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+    }
+  };
 
   const fullUrlOf = (r: InterfaceRecord) =>
     r.url +
@@ -85,6 +101,7 @@ export function DetailPanel({ record, store }: Props) {
     setEditQuery(record.query);
     setEditBody(record.body ?? '');
     setEditName(record.name || record.path);
+    setUrlError('');
   };
   useEffect(() => {
     syncFromRecord();
@@ -96,10 +113,17 @@ export function DetailPanel({ record, store }: Props) {
   }
 
   const saveEdit = async () => {
-    if (!editUrl.trim()) return;
+    const text = editUrl.trim();
+    if (!text) return;
+    let u: URL;
+    try {
+      u = new URL(text);
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+      return;
+    }
     setSaving(true);
     try {
-      const u = new URL(editUrl.trim());
       for (const [k, v] of Object.entries(editQuery)) {
         if (!u.searchParams.has(k)) u.searchParams.set(k, v);
       }
@@ -136,7 +160,14 @@ export function DetailPanel({ record, store }: Props) {
   };
 
   const send = async () => {
-    const u = new URL(editUrl.trim());
+    const text = editUrl.trim();
+    let u: URL;
+    try {
+      u = new URL(text);
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+      return;
+    }
     for (const [k, v] of Object.entries(editQuery)) {
       if (!u.searchParams.has(k)) u.searchParams.set(k, v);
     }
@@ -154,7 +185,7 @@ export function DetailPanel({ record, store }: Props) {
       setHistoryIdx(null);
       setTab('response');
     } catch (e) {
-      setSendError(e instanceof Error ? e.message : String(e));
+      setSendError(friendlyError(e));
     } finally {
       setSending(false);
     }
@@ -167,7 +198,14 @@ export function DetailPanel({ record, store }: Props) {
   };
 
   const copyCurl = () => {
-    const u = new URL(editUrl.trim());
+    const text = editUrl.trim();
+    let u: URL;
+    try {
+      u = new URL(text);
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+      return;
+    }
     for (const [k, v] of Object.entries(editQuery)) {
       if (!u.searchParams.has(k)) u.searchParams.set(k, v);
     }
@@ -222,15 +260,21 @@ export function DetailPanel({ record, store }: Props) {
             </select>
             <input
               value={editUrl}
-              onChange={(e) => setEditUrl(e.target.value)}
+              onChange={(e) => handleEditUrl(e.target.value)}
               placeholder="https://api.example.com/users"
-              className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-1.5 text-[13px] outline-none focus:border-brand/60"
+              className={
+                'min-w-0 flex-1 rounded-md border bg-slate-800/40 px-3 py-1.5 text-[13px] outline-none ' +
+                (urlError
+                  ? 'border-rose-500/60 focus:border-rose-500'
+                  : 'border-slate-700/50 focus:border-brand/60')
+              }
             />
           </div>
+          {urlError && <div className="text-[12px] text-rose-400">{urlError}</div>}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={sending ? cancel : send}
-              disabled={!sending && !editUrl.trim()}
+              disabled={!sending && (!editUrl.trim() || !!urlError)}
               className={`flex items-center gap-1 rounded-lg px-3 py-1.5 text-[12.5px] font-medium transition cursor-pointer ${
                 sending
                   ? 'bg-rose-500/20 text-rose-300 hover:bg-rose-500/30'
@@ -249,16 +293,18 @@ export function DetailPanel({ record, store }: Props) {
             </button>
             <button
               onClick={() => copy(editUrl)}
+              title="复制 URL"
               className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 cursor-pointer"
             >
-              <Copy size={13} /> 复制
+              <Copy size={13} className="shrink-0" />
+              <span className="hidden sm:inline">复制</span>
             </button>
             <button
               onClick={copyCurl}
               className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 cursor-pointer"
             >
-              {curlCopied ? <Check size={13} /> : <Copy size={13} />}
-              {curlCopied ? '已复制' : 'cURL'}
+              {curlCopied ? <Check size={13} className="shrink-0" /> : <Copy size={13} className="shrink-0" />}
+              <span className="hidden sm:inline">{curlCopied ? '已复制' : 'cURL'}</span>
             </button>
             <button
               onClick={() => store.togglePin(record.id)}
@@ -269,7 +315,7 @@ export function DetailPanel({ record, store }: Props) {
                   : 'bg-slate-800/50 text-slate-300 hover:text-slate-100'
               }`}
             >
-              <Star size={13} fill={record.pinned ? 'currentColor' : 'none'} />
+              <Star size={13} fill={record.pinned ? 'currentColor' : 'none'} className="shrink-0" />
             </button>
             <button
               onClick={duplicate}
@@ -277,27 +323,31 @@ export function DetailPanel({ record, store }: Props) {
               title="复制接口"
               className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:text-slate-100 disabled:opacity-40 cursor-pointer"
             >
-              <Copy size={13} /> 复制接口
+              <Copy size={13} className="shrink-0" />
+              <span className="hidden md:inline">复制接口</span>
             </button>
             <button
               onClick={() => setConfirmDelete(true)}
               title="删除接口"
               className="flex items-center gap-1 rounded-lg bg-slate-800/50 px-3 py-1.5 text-[12.5px] text-rose-400/80 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
             >
-              <Trash2 size={13} /> 删除
+              <Trash2 size={13} className="shrink-0" />
+              <span className="hidden md:inline">删除</span>
             </button>
             <button
               onClick={saveEdit}
-              disabled={!editUrl.trim() || saving}
+              disabled={!editUrl.trim() || !!urlError || saving}
               className="flex items-center gap-1 rounded-lg bg-gradient-to-br from-brand to-brand-light px-3 py-1.5 text-[12.5px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
             >
-              <Check size={13} /> 保存修改
+              <Check size={13} className="shrink-0" /> 保存修改
             </button>
             <button
               onClick={syncFromRecord}
+              title="重置为原记录"
               className="flex items-center gap-1 rounded-lg bg-slate-700/50 px-3 py-1.5 text-[12.5px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
             >
-              <X size={13} /> 重置
+              <X size={13} className="shrink-0" />
+              <span className="hidden md:inline">重置</span>
             </button>
           </div>
           <div className="mt-2 flex items-center gap-1.5">
@@ -327,12 +377,12 @@ export function DetailPanel({ record, store }: Props) {
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-700/40 px-5">
+      <div className="flex gap-1 overflow-x-auto border-b border-slate-700/40 px-5 [&>button]:shrink-0">
         {tabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`relative px-3 py-2 text-[12.5px] font-medium transition cursor-pointer ${
+            className={`relative whitespace-nowrap px-3 py-2 text-[12.5px] font-medium transition cursor-pointer ${
               tab === t.key ? 'text-brand-light' : 'text-slate-500 hover:text-slate-300'
             }`}
           >

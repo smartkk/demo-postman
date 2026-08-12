@@ -92,9 +92,57 @@ export function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
+/** 超大响应体的硬截断阈值（字符数）。超过则默认只渲染前 N 字符，避免大 DOM 卡顿。 */
+export const HARD_TRUNCATE_CHARS = 200_000;
+
+/**
+ * 若文本超过硬截断阈值，返回 { truncated, preview, rest }，
+ * preview 为前 N 字符，rest 为剩余字符数；否则返回原样。
+ */
+export function hardTruncate(text: string): {
+  truncated: boolean;
+  preview: string;
+  restChars: number;
+} {
+  if (text.length <= HARD_TRUNCATE_CHARS) {
+    return { truncated: false, preview: text, restChars: 0 };
+  }
+  return {
+    truncated: true,
+    preview: text.slice(0, HARD_TRUNCATE_CHARS),
+    restChars: text.length - HARD_TRUNCATE_CHARS,
+  };
+}
+
 function escapeShellSingle(s: string): string {
   // curl 单引号包裹时，内部单引号转义为 '\''
   return s.replace(/'/g, `'\\''`);
+}
+
+/**
+ * 把网络/请求相关的英文错误翻译成中文友好提示。
+ * - Electron net / fetch 抛出的 Error 通常含 ERR_* 或连接失败描述
+ * - 解析失败等内部异常也给出可读信息
+ */
+export function friendlyError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err ?? '未知错误');
+  const map: [RegExp, string][] = [
+    [/ERR_CONNECTION_REFUSED/i, '连接被拒绝：目标服务器未启动或无响应'],
+    [/ERR_CONNECTION_TIMED_OUT|ETIMEDOUT|timed out/i, '连接超时：服务器响应过慢或网络不通'],
+    [/ERR_NAME_NOT_RESOLVED|ENOTFOUND|getaddrinfo/i, '域名无法解析：请检查 URL 中的主机名'],
+    [/ERR_INTERNET_DISCONNECTED/i, '网络已断开：当前设备无可用网络连接'],
+    [/ERR_CERT|AUTHORITY_INVALID|SSL|certificate/i, 'SSL 证书错误：目标站点的证书不受信任或不匹配'],
+    [/ERR_ABORTED/i, '请求被中止'],
+    [/ERR_TOO_MANY_REDIRECTS/i, '重定向次数过多：可能存在环路'],
+    [/Failed to fetch|NetworkError|net::/i, '网络请求失败：请检查地址、代理与网络'],
+    [/Invalid URL|invalid uri|not a valid url/i, 'URL 不合法：请检查请求地址格式'],
+    [/JSON/i, 'JSON 解析失败：响应内容不是合法 JSON'],
+    [/timeout/i, '请求超时'],
+  ];
+  for (const [re, msg] of map) {
+    if (re.test(raw)) return msg;
+  }
+  return raw;
 }
 
 /** 由请求信息构造可复制的 curl 命令。 */

@@ -78,11 +78,13 @@ export interface ExtensionStatus {
   port: number;
 }
 
-/** 定时调度配置：以固定间隔自动调用某个接口。 */
+/** 定时调度配置：以固定间隔自动调用某个接口或链式任务。 */
 export interface ScheduleConfig {
   id: string;
   name: string;
   input: CaptureInput;
+  /** 若设置，则定时执行该链式任务（ChainProject.id）；此时 input 不生效。 */
+  chainId?: string;
   /** 调用间隔（秒）。 */
   intervalSeconds: number;
   enabled: boolean;
@@ -102,6 +104,8 @@ export interface ScheduleRunResult {
   statusText: string;
   durationMs: number;
   error?: string;
+  /** 响应体（可能截断，便于在历史中查看）。 */
+  body?: string | null;
   /** 被调度触发（开始发送）的时间。 */
   firedAt: string;
   /** 响应完成时间（含重定向/网络耗时）。 */

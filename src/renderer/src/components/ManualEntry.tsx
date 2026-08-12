@@ -21,6 +21,22 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
   const [showCurl, setShowCurl] = useState(false);
   const [curlText, setCurlText] = useState('');
   const [curlError, setCurlError] = useState('');
+  const [urlError, setUrlError] = useState('');
+
+  // 实时校验 URL 合法性，避免在 submit 中 new URL() 抛错导致崩溃。
+  const handleUrl = (text: string) => {
+    setUrl(text);
+    if (!text.trim()) {
+      setUrlError('');
+      return;
+    }
+    try {
+      new URL(text.trim());
+      setUrlError('');
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+    }
+  };
 
   const applyCurl = (direct: boolean) => {
     const text = curlText.trim();
@@ -53,7 +69,7 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
         method: parsed.method,
         url: u.toString(),
         headers: parsed.headers,
-        body: parsed.body,
+        body: parsed.body ? parsed.body : null,
         contentType: parsed.headers['content-type'] || null,
       });
     } catch (e) {
@@ -62,8 +78,15 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
   };
 
   const submit = () => {
-    if (!url.trim()) return;
-    const u = new URL(url.trim());
+    const text = url.trim();
+    if (!text) return;
+    let u: URL;
+    try {
+      u = new URL(text);
+    } catch {
+      setUrlError('URL 格式不正确（需包含 http:// 或 https://）');
+      return;
+    }
     for (const [k, v] of Object.entries(query)) {
       if (!u.searchParams.has(k)) u.searchParams.set(k, v);
     }
@@ -78,7 +101,7 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm animate-fade-in"
       onClick={onClose}
     >
       <div
@@ -149,11 +172,17 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
             </select>
             <input
               value={url}
-              onChange={(e) => setUrl(e.target.value)}
+              onChange={(e) => handleUrl(e.target.value)}
               placeholder="https://api.example.com/users"
-              className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-3 py-2 text-[13px] outline-none focus:border-brand/60"
+              className={
+                'min-w-0 flex-1 rounded-md border bg-slate-800/40 px-3 py-2 text-[13px] outline-none ' +
+                (urlError
+                  ? 'border-rose-500/60 focus:border-rose-500'
+                  : 'border-slate-700/50 focus:border-brand/60')
+              }
             />
           </div>
+          {urlError && <div className="text-[12px] text-rose-400">{urlError}</div>}
 
           <Section title="Headers">
             <KeyValueEditor value={headers} onChange={setHeaders} />
@@ -187,7 +216,7 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
           </button>
           <button
             onClick={submit}
-            disabled={!url.trim()}
+            disabled={!url.trim() || !!urlError}
             className="rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
           >
             保存（自动去重）

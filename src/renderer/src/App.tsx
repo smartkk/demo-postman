@@ -95,6 +95,26 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // 全局复制兜底：只读区域未选中任何文本、且焦点不在可编辑元素时，
+  // 阻止 Ctrl/Cmd+C 的默认「复制整页文档」回退（表现为整页字符被选中高亮）。
+  useEffect(() => {
+    const onCopy = (e: ClipboardEvent) => {
+      const sel = window.getSelection();
+      const hasSelection = !!sel && sel.toString().length > 0;
+      if (hasSelection) return;
+      const ae = document.activeElement as HTMLElement | null;
+      const editable =
+        ae &&
+        (ae.tagName === 'INPUT' ||
+          ae.tagName === 'TEXTAREA' ||
+          ae.isContentEditable);
+      if (editable) return;
+      e.preventDefault();
+    };
+    document.addEventListener('copy', onCopy);
+    return () => document.removeEventListener('copy', onCopy);
+  }, []);
+
   const toggleProxy = async () => {
     const s = await api.toggleProxy();
     setProxyStatus(s);

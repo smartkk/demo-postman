@@ -8,9 +8,11 @@ import {
   syntaxHighlightJson,
   byteSize,
   formatSize,
+  hardTruncate,
 } from '../lib/format';
 import { KVTable } from './KVTable';
 import { JsonTree } from './JsonTree';
+import { selectPreOnClick } from '../lib/select';
 
 interface Props {
   body: string | null;
@@ -73,6 +75,7 @@ export function BodyView({
   const [treeKey, setTreeKey] = useState(0);
   const [raw, setRaw] = useState(false);
   const [search, setSearch] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
   if (body == null || body.trim() === '') {
     return (
@@ -80,14 +83,18 @@ export function BodyView({
     );
   }
 
-  const kind = detectKind(contentType, body);
-  const size = byteSize(body);
-  const lineCount = body.split('\n').length;
+  // 超大响应体硬截断：超过阈值时默认只渲染前 N 字符，避免大 DOM 卡顿。
+  const trunc = hardTruncate(body);
+  const effectiveBody = showAll ? body : trunc.preview;
+
+  const kind = detectKind(contentType, effectiveBody);
+  const size = byteSize(effectiveBody);
+  const lineCount = effectiveBody.split('\n').length;
   const isLong = collapsible && (lineCount > COLLAPSE_LINES || size > COLLAPSE_BYTES);
   const searching = search.trim() !== '';
 
   const copyText = () => {
-    const text = kind === 'json' ? tryPrettyJson(body) || body : body;
+    const text = kind === 'json' ? tryPrettyJson(effectiveBody) || effectiveBody : effectiveBody;
     navigator.clipboard?.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
@@ -197,32 +204,51 @@ export function BodyView({
 
   let content: React.ReactNode;
   if (kind === 'form') {
-    content = <KVTable data={parseFormUrlEncoded(body)} />;
+    content = <KVTable data={parseFormUrlEncoded(effectiveBody)} />;
   } else if (kind === 'json' && !raw && !searching) {
-    const parsed = parseJsonSafe(body);
+    const parsed = parseJsonSafe(effectiveBody);
     content = parsed !== null ? (
       <div className="overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-900/60 p-4">
         <JsonTree key={treeKey} data={parsed} expandAll={treeExpandAll} />
       </div>
     ) : (
       <pre
+        onClick={selectPreOnClick}
         className="overflow-x-auto rounded-lg border border-slate-700/40 bg-slate-900/60 p-4 text-[12.5px] leading-relaxed"
-        dangerouslySetInnerHTML={{ __html: syntaxHighlightJson(tryPrettyJson(body) || body) }}
+        dangerouslySetInnerHTML={{ __html: syntaxHighlightJson(tryPrettyJson(effectiveBody) || effectiveBody) }}
       />
     );
   } else {
-    const display = kind === 'json' ? tryPrettyJson(body) || body : body;
+    const display = kind === 'json' ? tryPrettyJson(effectiveBody) || effectiveBody : effectiveBody;
     content = (
-      <pre className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-slate-700/40 bg-slate-900/60 p-4 text-[12.5px] leading-relaxed text-slate-300">
+      <pre
+        onClick={selectPreOnClick}
+        className="overflow-x-auto whitespace-pre-wrap break-words rounded-lg border border-slate-700/40 bg-slate-900/60 p-4 text-[12.5px] leading-relaxed text-slate-300"
+      >
         {highlight(display, search)}
       </pre>
     );
   }
 
+  const truncatedNote = trunc.truncated && !showAll && (
+    <div className="mb-1.5 flex items-center gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-[11px] text-amber-300">
+      <span>
+        响应过大，已截断显示前 {formatSize(trunc.preview.length)}（共 {formatSize(body.length)}），剩余 {trunc.restChars.toLocaleString()} 字符未渲染。
+      </span>
+      <button
+        onClick={() => setShowAll(true)}
+        className="ml-auto shrink-0 rounded bg-amber-500/20 px-2 py-0.5 text-amber-200 transition hover:bg-amber-500/30 cursor-pointer"
+      >
+        展开全部
+      </button>
+    </div>
+  );
+
   if (!isLong || expanded || searching) {
     return (
       <div>
         {header}
+        {truncatedNote}
         {content}
       </div>
     );
@@ -231,6 +257,7 @@ export function BodyView({
   return (
     <div>
       {header}
+      {truncatedNote}
       <div className="relative max-h-[320px] overflow-hidden">
         {content}
         <div className="pointer-events-none absolute inset-x-0 bottom-0 flex h-16 items-end justify-center bg-gradient-to-t from-slate-900 to-transparent pb-2">

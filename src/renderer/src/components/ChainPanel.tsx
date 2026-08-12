@@ -1,10 +1,12 @@
 import { useState, useCallback, useEffect } from 'react';
-import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, FolderPlus, Folder, ArrowUp, ArrowDown, GitBranch } from 'lucide-react';
+import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, FolderPlus, Folder, ArrowUp, ArrowDown, GitBranch, Download, Search, Eye } from 'lucide-react';
 import { api } from '../api/client';
+import { selectPreOnClick } from '../lib/select';
 import type {
   ChainProject,
   ChainRunResult,
   ChainStep,
+  InterfaceRecord,
 } from '../../../shared/types';
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
@@ -35,9 +37,15 @@ export function ChainPanel({ onClose }: Props) {
   const [steps, setSteps] = useState<ChainStep[]>([emptyStep()]);
   const [activeStep, setActiveStep] = useState(0);
 
+  // 本地已记录的接口，供「引入到链式步骤」
+  const [localRecords, setLocalRecords] = useState<InterfaceRecord[]>([]);
+  const [showLocal, setShowLocal] = useState(false);
+  const [localKw, setLocalKw] = useState('');
+
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<ChainRunResult[] | null>(null);
   const [error, setError] = useState('');
+  const [viewResult, setViewResult] = useState<ChainRunResult | null>(null);
 
   // ── 持久化 ──
   const [projects, setProjects] = useState<ChainProject[]>([]);
@@ -61,13 +69,37 @@ export function ChainPanel({ onClose }: Props) {
     return off;
   }, [refreshList]);
 
+  // 加载本地已记录的接口列表
+  useEffect(() => {
+    api.getList().then(setLocalRecords).catch(() => setLocalRecords([]));
+  }, []);
+
   /* ── 步骤编辑 ── */
   const updateStep = (idx: number, patch: Partial<ChainStep>) =>
     setSteps((ss) => ss.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
 
-  const addStep = () => {
-    setSteps((ss) => [...ss, emptyStep()]);
+  const addStep = (preset?: Partial<ChainStep>) => {
+    const s = { ...emptyStep(), ...preset };
+    setSteps((ss) => [...ss, s]);
     setActiveStep(steps.length);
+  };
+
+  // 将本地记录的接口引入为新的链式步骤（自动重建完整 URL，含 query）
+  const importFromLocal = (rec: InterfaceRecord) => {
+    const qs = Object.entries(rec.query || {})
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const fullUrl = qs ? `${rec.url}?${qs}` : rec.url;
+    const preset: Partial<ChainStep> = {
+      name: (rec.name || rec.path || rec.url).slice(0, 24),
+      method: (rec.method || 'GET') as ChainStep['method'],
+      url: fullUrl,
+      headers: { ...(rec.headers || {}) },
+      body: rec.body ?? null,
+    };
+    addStep(preset);
+    setShowLocal(false);
+    setLocalKw('');
   };
   const removeStep = (idx: number) => {
     if (steps.length <= 1) return;
@@ -105,9 +137,10 @@ export function ChainPanel({ onClose }: Props) {
 
   const buildProject = (): Omit<ChainProject, 'id' | 'createdAt' | 'updatedAt'> => ({
     name: projectName.trim() || '未命名链式任务',
-    steps: steps.map((s) => ({
+    steps: steps.map((s, i) => ({
       ...s,
-      name: s.name.trim() || s.id,
+      // 空名步骤自动填充 step1/step2…，便于用 {{step1.字段}} 手动引用
+      name: s.name.trim() || `step${i + 1}`,
       extract: s.extract || {},
     })),
     folder,
@@ -231,11 +264,29 @@ export function ChainPanel({ onClose }: Props) {
     return { text: `${r.status}`, cls: 'bg-slate-700 text-slate-400' };
   };
 
+  // 美化 JSON 字符串，失败则原样返回
+  const prettyJson = (raw?: string | null) => {
+    if (!raw) return '';
+    try {
+      return JSON.stringify(JSON.parse(raw), null, 2);
+    } catch {
+      return raw;
+    }
+  };
+
+  // 结果详情分节小组件
+  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div>
+      <div className="mb-1 text-[11.5px] font-medium text-slate-400">{title}</div>
+      {children}
+    </div>
+  );
+
   const cur = steps[activeStep];
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
@@ -282,21 +333,24 @@ export function ChainPanel({ onClose }: Props) {
             )}
             {folders.map((f) => {
               const items = projects.filter((p) => p.folder === f);
-              if (items.length === 0) return null;
               return (
                 <div key={f} className="mb-1.5">
                   <div className="flex items-center gap-1 px-1 py-1 text-[10.5px] uppercase tracking-wide text-slate-500">
                     <Folder size={11} /> {f}
                   </div>
-                  {items.map((p) => (
-                    <ChainItem
-                      key={p.id}
-                      p={p}
-                      active={p.id === activeId}
-                      onOpen={() => loadProject(p)}
-                      onDelete={() => deleteProject(p.id)}
-                    />
-                  ))}
+                  {items.length === 0 ? (
+                    <div className="px-2 py-1 text-[11px] text-slate-600">暂无任务</div>
+                  ) : (
+                    items.map((p) => (
+                      <ChainItem
+                        key={p.id}
+                        p={p}
+                        active={p.id === activeId}
+                        onOpen={() => loadProject(p)}
+                        onDelete={() => deleteProject(p.id)}
+                      />
+                    ))
+                  )}
                 </div>
               );
             })}
@@ -359,14 +413,78 @@ export function ChainPanel({ onClose }: Props) {
           </p>
 
           {/* 步骤列表（顺序 + 上下移） */}
-          <div className="mb-4 flex items-center justify-between">
+          <div className="relative mb-4 flex items-center justify-between">
             <span className="text-[12px] font-medium text-slate-400">步骤（按顺序排列 = 调用顺序）</span>
-            <button
-              onClick={addStep}
-              className="flex items-center gap-1 rounded-md bg-brand/20 px-2 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
-            >
-              <Plus size={12} /> 步骤
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setShowLocal((v) => !v)}
+                className={`flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition cursor-pointer ${
+                  showLocal
+                    ? 'bg-brand/30 text-brand-light'
+                    : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700/60'
+                }`}
+              >
+                <Download size={12} /> 引入本地请求
+              </button>
+              <button
+                onClick={addStep}
+                className="flex items-center gap-1 rounded-md bg-brand/20 px-2 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
+              >
+                <Plus size={12} /> 步骤
+              </button>
+            </div>
+
+            {/* 本地请求选择浮层 */}
+            {showLocal && (
+              <div className="absolute right-0 top-9 z-20 max-h-[300px] w-[360px] overflow-hidden rounded-xl border border-slate-700/50 bg-slate-900/95 shadow-2xl backdrop-blur">
+                <div className="flex items-center gap-2 border-b border-slate-700/50 px-2.5 py-2">
+                  <Search size={13} className="shrink-0 text-slate-500" />
+                  <input
+                    value={localKw}
+                    onChange={(e) => setLocalKw(e.target.value)}
+                    placeholder="搜索本地接口（名称/URL/方法）"
+                    className="min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+                  />
+                  <button
+                    onClick={() => setShowLocal(false)}
+                    className="rounded p-0.5 text-slate-500 transition hover:text-slate-200 cursor-pointer"
+                  >
+                    <X size={13} />
+                  </button>
+                </div>
+                <div className="max-h-[250px] overflow-y-auto">
+                  {localRecords.length === 0 && (
+                    <div className="px-3 py-6 text-center text-[11.5px] text-slate-500">
+                      暂无本地接口记录
+                    </div>
+                  )}
+                  {localRecords
+                    .filter((r) => {
+                      const kw = localKw.trim().toLowerCase();
+                      if (!kw) return true;
+                      return [r.method, r.url, r.name || '', r.path || '']
+                        .join(' ')
+                        .toLowerCase()
+                        .includes(kw);
+                    })
+                    .map((r) => (
+                      <button
+                        key={r.id}
+                        onClick={() => importFromLocal(r)}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-700/40 cursor-pointer"
+                      >
+                        <span className="shrink-0 rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-medium text-brand-light">
+                          {r.method}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-[11.5px] text-slate-200">
+                          {r.name || r.path || r.url}
+                        </span>
+                        <Download size={12} className="shrink-0 text-slate-500" />
+                      </button>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="space-y-1.5">
             {steps.map((s, i) => (
@@ -467,7 +585,9 @@ export function ChainPanel({ onClose }: Props) {
               <div>
                 <div className="mb-1.5 text-[12px] font-medium text-slate-400">
                   从响应提取（输出变量 → JSON 路径，如 <code className="text-brand-light">token</code> →{' '}
-                  <code className="text-brand-light">data.token</code>）
+                  <code className="text-brand-light">data.token</code>，或数组项{' '}
+                  <code className="text-brand-light">firstId</code> →{' '}
+                  <code className="text-brand-light">page.data.records[0].id</code>）
                 </div>
                 <ExtractEditor value={extract} onChange={setExtract} stepName={cur.name} />
               </div>
@@ -523,7 +643,9 @@ export function ChainPanel({ onClose }: Props) {
                       return (
                         <tr
                           key={r.stepId + '-' + r.index}
-                          className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
+                          onClick={() => setViewResult(r)}
+                          title="点击查看完整请求 / 响应"
+                          className="cursor-pointer border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/30"
                         >
                           <td className="px-2 py-1.5 text-slate-400">{r.index + 1}</td>
                           <td className="px-2 py-1.5 text-slate-300">{r.name || r.stepId}</td>
@@ -538,6 +660,7 @@ export function ChainPanel({ onClose }: Props) {
                           </td>
                           <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400">
                             {r.error ?? r.body?.slice(0, 120) ?? '-'}
+                            <span className="ml-1 text-[10px] text-brand-light/70">查看 ›</span>
                           </td>
                         </tr>
                       );
@@ -545,6 +668,93 @@ export function ChainPanel({ onClose }: Props) {
                   </tbody>
                 </table>
               </div>
+
+              {/* 单步结果详情抽屉 */}
+              {viewResult && (
+                <div className="mt-3 overflow-hidden rounded-xl border border-slate-700/50 bg-slate-800/40">
+                  <div className="flex items-center gap-2 border-b border-slate-700/50 px-3 py-2">
+                    <span className="text-[12px] font-medium text-slate-200">
+                      第 {viewResult.index + 1} 步 · {viewResult.name || viewResult.stepId}
+                    </span>
+                    <span
+                      className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                        statusBadge(viewResult).cls
+                      }`}
+                    >
+                      {viewResult.error ? '错误' : viewResult.status || '-'}
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      {viewResult.durationMs}ms · {viewResult.at}
+                    </span>
+                    <button
+                      onClick={() => setViewResult(null)}
+                      className="ml-auto rounded p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-100 cursor-pointer"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <div className="max-h-[340px] space-y-3 overflow-y-auto p-3">
+                    {/* 实际请求 */}
+                    <Section title="实际发送请求">
+                      <div className="mb-1 font-mono text-[11.5px] text-brand-light">
+                        {viewResult.request.method}{' '}
+                        <span className="text-slate-300">{viewResult.request.url}</span>
+                      </div>
+                      {viewResult.request.headers &&
+                        Object.keys(viewResult.request.headers).length > 0 && (
+                          <div className="mb-1">
+                            <div className="mb-0.5 text-[11px] text-slate-500">Headers</div>
+                            <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
+                              {Object.entries(viewResult.request.headers)
+                                .map(([k, v]) => `${k}: ${v}`)
+                                .join('\n')}
+                            </pre>
+                          </div>
+                        )}
+                      {viewResult.request.body && (
+                        <div>
+                          <div className="mb-0.5 text-[11px] text-slate-500">Body</div>
+                          <pre onClick={selectPreOnClick} className="max-h-[160px] overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
+                            {prettyJson(viewResult.request.body)}
+                          </pre>
+                        </div>
+                      )}
+                      {!viewResult.request.body && (
+                        <div className="text-[11px] text-slate-500">（无请求体）</div>
+                      )}
+                    </Section>
+
+                    {/* 提取变量 */}
+                    <Section title="提取的变量">
+                      {Object.entries(viewResult.extracted).length > 0 ? (
+                        <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
+                          {Object.entries(viewResult.extracted)
+                            .map(([k, v]) => `${k} = ${v}`)
+                            .join('\n')}
+                        </pre>
+                      ) : (
+                        <div className="text-[11px] text-slate-500">（无提取变量）</div>
+                      )}
+                    </Section>
+
+                    {/* 响应 */}
+                    <Section title="响应">
+                      {viewResult.error ? (
+                        <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-rose-500/10 p-2 font-mono text-[11px] text-rose-300">
+                          {viewResult.error}
+                        </pre>
+                      ) : viewResult.body ? (
+                        <pre onClick={selectPreOnClick} className="max-h-[200px] overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
+                          {prettyJson(viewResult.body)}
+                        </pre>
+                      ) : (
+                        <div className="text-[11px] text-slate-500">（无响应体）</div>
+                      )}
+                    </Section>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -598,6 +808,7 @@ function ExtractEditor({
   onChange: (v: Record<string, string>) => void;
   stepName: string;
 }) {
+  const [sample, setSample] = useState('');
   const entries = Object.entries(value);
   const setAt = (i: number, outKey: string, jsonPath: string) => {
     const next: Record<string, string> = {};
@@ -613,6 +824,33 @@ function ExtractEditor({
     delete next[k];
     onChange(next);
   };
+
+  // 预览：用示例响应实时解析每条路径（与主进程 getPath 逻辑一致，支持数组下标）
+  const tryParse = (() => {
+    try {
+      return sample.trim() ? JSON.parse(sample) : undefined;
+    } catch {
+      return null; // 解析失败标记
+    }
+  })();
+  const resolvePath = (obj: unknown, path: string): string | undefined => {
+    const tokens = path.match(/[^.[\]]+|\[\d+\]/g);
+    if (!tokens) return undefined;
+    let cur: any = obj;
+    for (const raw of tokens) {
+      if (cur == null) return undefined;
+      if (raw.startsWith('[')) {
+        const idx = parseInt(raw.slice(1, -1), 10);
+        if (!Array.isArray(cur) || idx < 0 || idx >= cur.length) return undefined;
+        cur = cur[idx];
+      } else {
+        cur = cur[raw];
+      }
+    }
+    if (cur == null) return undefined;
+    return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);
+  };
+
   return (
     <div className="space-y-1.5">
       {entries.map(([k, v], i) => (
@@ -627,7 +865,7 @@ function ExtractEditor({
           <input
             value={v}
             onChange={(e) => setAt(i, k, e.target.value)}
-            placeholder="JSON 路径，如 data.token"
+            placeholder="JSON 路径，如 data.token 或 page.data.records[0].id"
             className="flex-1 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 font-mono text-[11.5px] outline-none focus:border-brand/60"
           />
           <button
@@ -645,6 +883,47 @@ function ExtractEditor({
         </code>{' '}
         引用
       </div>
+
+      {/* 提取预览：粘贴示例响应实时验证路径 */}
+      <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-2">
+        <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-slate-400">
+          <Eye size={12} /> 提取预览（粘贴示例响应 JSON 实时验证）
+        </div>
+        <textarea
+          value={sample}
+          onChange={(e) => setSample(e.target.value)}
+          placeholder={'{\n  "page": { "data": { "records": [ { "id": "abc" } ] } }\n}'}
+          spellCheck={false}
+          rows={4}
+          className="w-full resize-y rounded border border-slate-700/50 bg-slate-800/40 p-2 font-mono text-[11px] outline-none focus:border-brand/60"
+        />
+        {sample.trim() !== '' && (
+          <div className="mt-1.5 space-y-1">
+            {tryParse === null ? (
+              <div className="text-[11px] text-rose-400">示例响应不是合法 JSON</div>
+            ) : entries.length === 0 ? (
+              <div className="text-[11px] text-slate-500">先添加提取规则</div>
+            ) : (
+              entries.map(([k, v]) => {
+                const p = k.trim() || '(未命名)';
+                const res = v.trim() ? resolvePath(tryParse, v.trim()) : undefined;
+                return (
+                  <div key={k} className="flex items-start gap-1.5 text-[11px]">
+                    <span className="shrink-0 font-mono text-brand-light">{'{{' + stepName + '.' + p + '}}'}</span>
+                    <span className="text-slate-500">=</span>
+                    {res === undefined ? (
+                      <span className="text-amber-400/80">路径未匹配：{v}</span>
+                    ) : (
+                      <span className="min-w-0 flex-1 break-all font-mono text-emerald-300">{res}</span>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+
       <button
         onClick={add}
         className="flex items-center gap-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"

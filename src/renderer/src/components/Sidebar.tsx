@@ -259,10 +259,10 @@ export function Sidebar({ store }: Props) {
 
       {/* ── 工具栏：统计 + 操作按钮 ── */}
       <div className="flex items-center gap-1.5 px-3 pb-2">
-        <span className="flex-1 text-[11.5px] text-slate-500">
+        <span className="min-w-0 flex-1 truncate text-[11.5px] text-slate-500">
           共 <span className="text-slate-300 font-medium">{filtered.length}</span> 个接口
         </span>
-        <div className="flex items-center gap-0.5">
+        <div className="flex shrink-0 items-center gap-0.5">
           {/* 导入 */}
           <button
             onClick={() => fileRef.current?.click()}

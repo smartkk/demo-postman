@@ -42,58 +42,60 @@ export function ProxyBar({
   };
 
   return (
-    <header className="glass flex h-12 shrink-0 items-center justify-between px-4">
-      <div className="flex items-center gap-2">
+    <header className="glass flex h-12 shrink-0 items-center gap-2 px-3 sm:px-4">
+      <div className="flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-light shadow-lg shadow-brand/30">
           <Server size={16} className="text-white" />
         </div>
-        <span className="text-[15px] font-semibold tracking-wide text-slate-100">
+        <span className="hidden text-[15px] font-semibold tracking-wide text-slate-100 sm:inline">
           Demo Postman
         </span>
-        <span className="ml-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-400">
+        <span className="ml-1 hidden rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-400 lg:inline">
           接口记录工具
         </span>
       </div>
 
-      <div className="flex items-center gap-3">
+      {/* 右侧操作区：窗口变窄时文字隐藏、仅留图标；极窄时整体可横向滚动，杜绝堆叠 */}
+      <div className="ml-auto flex min-w-0 items-center gap-1.5 overflow-x-auto sm:gap-2 lg:gap-3 [&>button]:shrink-0">
         <button
           onClick={onToggle}
-          className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all cursor-pointer ${
+          className={`flex items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all cursor-pointer sm:px-3 ${
             status.running
               ? 'bg-emerald-500/15 text-emerald-300 hover:bg-emerald-500/25'
               : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700/60'
           }`}
         >
           <span
-            className={`h-2 w-2 rounded-full ${
+            className={`h-2 w-2 shrink-0 rounded-full ${
               status.running
                 ? 'bg-emerald-400 shadow-[0_0_8px] shadow-emerald-400'
                 : 'bg-slate-500'
             }`}
           />
-          {status.running ? `代理运行中 · :${status.port}` : '代理已停止'}
+          <span className="hidden sm:inline">{status.running ? `代理运行中 · :${status.port}` : '代理已停止'}</span>
         </button>
 
         <button
           onClick={onToggleExt}
           title="浏览器插件接收端点：开启后，配合 Chrome 扩展可自动记录页面发出的请求"
-          className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-all cursor-pointer ${
+          className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[13px] font-medium transition-all cursor-pointer sm:px-3 ${
             extStatus.running
               ? 'bg-sky-500/15 text-sky-300 hover:bg-sky-500/25'
               : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700/60'
           }`}
         >
-          <Puzzle size={14} />
-          {extStatus.running ? `插件端点 · :${extStatus.port}` : '插件端点已停'}
+          <Puzzle size={14} className="shrink-0" />
+          <span className="hidden sm:inline">{extStatus.running ? `插件端点 · :${extStatus.port}` : '插件端点已停'}</span>
         </button>
 
         {status.running && (
           <button
             onClick={configureSystemProxy}
             title="复制代理地址并打开系统代理设置"
-            className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+            className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
           >
-            <Network size={14} /> 配置系统代理
+            <Network size={14} className="shrink-0" />
+            <span className="hidden md:inline">配置系统代理</span>
           </button>
         )}
 
@@ -101,63 +103,69 @@ export function ProxyBar({
           <button
             onClick={() => setCaOpen(true)}
             title={`HTTPS 抓包需信任 CA：${status.caPath}`}
-            className="flex items-center gap-1 text-[11px] text-amber-400/80 transition hover:text-amber-300 cursor-pointer"
+            className="flex shrink-0 items-center gap-1 text-[11px] text-amber-400/80 transition hover:text-amber-300 cursor-pointer"
           >
-            <ShieldAlert size={13} /> HTTPS 需装 CA
+            <ShieldAlert size={13} className="shrink-0" />
+            <span className="hidden lg:inline">HTTPS 需装 CA</span>
           </button>
         )}
 
         <button
           onClick={onManual}
-          className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-3 py-1.5 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition-all hover:brightness-110 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-2.5 py-1.5 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition-all hover:brightness-110 cursor-pointer sm:px-3"
         >
-          <Plus size={15} /> 手动录入
+          <Plus size={15} className="shrink-0" />
+          <span className="hidden sm:inline">手动录入</span>
         </button>
 
         <button
           onClick={() => setLight((v) => !v)}
           title={light ? '切换到深色主题' : '切换到浅色主题'}
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
-          {light ? <Moon size={15} /> : <Sun size={15} />}
+          {light ? <Moon size={15} className="shrink-0" /> : <Sun size={15} className="shrink-0" />}
         </button>
 
         <button
           onClick={onSchedules}
           title="定时调度：以固定间隔自动调用接口"
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
-          <Clock size={15} /> 定时
+          <Clock size={15} className="shrink-0" />
+          <span className="hidden lg:inline">定时</span>
         </button>
 
         <button
           onClick={onBatch}
           title="批量调用：同一接口用不同参数批量请求"
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
-          <Layers size={15} /> 批量
+          <Layers size={15} className="shrink-0" />
+          <span className="hidden lg:inline">批量</span>
         </button>
 
         <button
           onClick={onChain}
           title="链式请求：多接口按顺序串联，上一步响应作为参数传给下一步"
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
-          <GitBranch size={15} /> 链式
+          <GitBranch size={15} className="shrink-0" />
+          <span className="hidden lg:inline">链式</span>
         </button>
 
         <button
           onClick={onSettings}
           title="抓取设置（白名单 / 自动分组）"
-          className="flex items-center gap-1.5 rounded-lg bg-slate-700/40 px-3 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer"
+          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
-          <Settings size={15} /> 设置
+          <Settings size={15} className="shrink-0" />
+          <span className="hidden lg:inline">设置</span>
         </button>
       </div>
 
       {caOpen && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
           onClick={() => setCaOpen(false)}
         >
           <div

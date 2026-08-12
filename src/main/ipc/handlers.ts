@@ -171,7 +171,7 @@ async function runBatchCall(
  * 供后续步骤的 URL / Header / Body 中的 {{步骤名.字段名}} 占位符引用。
  * 同时支持全局动态变量（{{$timestamp}} 等）与 {{变量名}} 行变量（此处无行变量，仅动态变量）。
  */
-async function runChain(
+export async function runChain(
   project: ChainProject,
   settings: Settings
 ): Promise<ChainRunResult[]> {
@@ -180,12 +180,20 @@ async function runChain(
   const stepVars: Record<string, Record<string, string>> = {};
   const results: ChainRunResult[] = [];
 
+  // 沿路径取值，支持点路径与数组下标：a.b[0].c.d[2]
   const getPath = (obj: unknown, path: string): string | undefined => {
-    const parts = path.split('.').map((p) => p.trim()).filter(Boolean);
+    const tokens = path.match(/[^.[\]]+|\[\d+\]/g);
+    if (!tokens) return undefined;
     let cur: any = obj;
-    for (const p of parts) {
+    for (const raw of tokens) {
       if (cur == null) return undefined;
-      cur = cur[p];
+      if (raw.startsWith('[')) {
+        const idx = parseInt(raw.slice(1, -1), 10);
+        if (!Array.isArray(cur) || idx < 0 || idx >= cur.length) return undefined;
+        cur = cur[idx];
+      } else {
+        cur = cur[raw];
+      }
     }
     if (cur == null) return undefined;
     return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);

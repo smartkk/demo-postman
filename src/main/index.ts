@@ -9,7 +9,7 @@ import { ExtensionReceiver } from './extension/extensionReceiver';
 import { Settings } from './settings';
 import { ScheduleManager } from './scheduler/scheduleManager';
 import { shouldCapture, hostnameOf } from './captureFilter';
-import { registerIpc } from './ipc/handlers';
+import { registerIpc, runChain } from './ipc/handlers';
 
 const PROXY_PORT = 8899;
 const EXTENSION_PORT = 8891;
@@ -116,9 +116,10 @@ app.whenReady().then(() => {
     (input) => onCapture(input),
     (method, url, response) => onResponse(method, url, response)
   );
-  scheduleManager = new ScheduleManager(
-    path.join(dataDir, 'schedules.json')
-  );
+  scheduleManager = new ScheduleManager(path.join(dataDir, 'schedules.json'), {
+    getChain: (id) => (chainStore ? chainStore.get(id) : null),
+    runChain: (p) => runChain(p, settings),
+  });
   batchStore = new BatchStore(path.join(dataDir, 'batch', 'batches.json'));
   chainStore = new ChainStore(path.join(dataDir, 'batch', 'chains.json'));
   registerIpc(

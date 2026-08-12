@@ -1,6 +1,18 @@
-import type { ScheduleConfig, ScheduleRunResult } from '../../shared/types';
+import type {
+  ScheduleConfig,
+  ScheduleRunResult,
+  ChainProject,
+  ChainRunResult,
+} from '../../shared/types';
 import { sendRequest } from '../request/sender';
 import { ScheduleStore } from './scheduleStore';
+
+export interface ScheduleChainDeps {
+  /** 按 id 获取链式任务。 */
+  getChain?: (id: string) => ChainProject | null;
+  /** 执行链式任务，返回各步骤结果。 */
+  runChain?: (p: ChainProject) => Promise<ChainRunResult[]>;
+}
 
 /**
  * 定时调度管理器：管理所有定时任务的 setInterval，任务执行时复用 sender.ts 的 sendRequest。
@@ -15,9 +27,11 @@ export class ScheduleManager {
   private store: ScheduleStore;
   private timers = new Map<string, ReturnType<typeof setTimeout>>();
   private push: ((list: ScheduleConfig[]) => void) | null = null;
+  private chainDeps: ScheduleChainDeps;
 
-  constructor(file: string) {
+  constructor(file: string, chainDeps: ScheduleChainDeps = {}) {
     this.store = new ScheduleStore(file);
+    this.chainDeps = chainDeps;
     // 任何持久化变更都推送到渲染进程（如果已绑定）
     this.store.onChange(() => {
       this.push?.(this.store.list());
@@ -99,16 +113,26 @@ export class ScheduleManager {
 
     let delay: number;
     const now = Date.now();
+    const interval = Math.max(s.intervalSeconds * 1000, 1000); // 最小 1 秒
+
     if (s.startAt) {
       const start = new Date(s.startAt).getTime();
-      // 若设置了未来时间，则等待到该刻再首次执行
-      if (!Number.isNaN(start) && start > now) {
-        delay = start - now;
+      if (!Number.isNaN(start)) {
+        if (start > now) {
+          // 首次：等待到指定的开始执行时间
+          delay = start - now;
+        } else {
+          // 已开始过：以 startAt 为相位锚点，对齐到 now 之后的下一个执行点，
+          // 保证列表「下次时间」与真实调度一致（不依赖本次 fire 的实际时刻）。
+          let next = start;
+          while (next <= now) next += interval;
+          delay = next - now;
+        }
       } else {
-        delay = Math.max(s.intervalSeconds * 1000, 1000); // 最小 1 秒
+        delay = interval;
       }
     } else {
-      delay = Math.max(s.intervalSeconds * 1000, 1000); // 最小 1 秒
+      delay = interval;
     }
     const timer = setTimeout(() => this.fire(id), delay);
     this.timers.set(id, timer);
@@ -119,12 +143,49 @@ export class ScheduleManager {
     if (!s) return;
 
     const firedAt = new Date().toISOString();
+    const MAX_HISTORY_BODY = 20 * 1024; // 历史中仅保留前 20KB 响应体
     try {
+      // ── 链式任务模式 ──
+      if (s.chainId && this.chainDeps.getChain && this.chainDeps.runChain) {
+        const project = this.chainDeps.getChain(s.chainId);
+        if (!project) {
+          throw new Error(`链式任务不存在：${s.chainId}`);
+        }
+        const steps = await this.chainDeps.runChain(project);
+        const failed = steps.find((st) => st.status === 0 || st.error);
+        const last = steps[steps.length - 1];
+        const summary = steps.map((st) => ({
+          step: st.name,
+          status: st.status,
+          statusText: st.statusText,
+          durationMs: st.durationMs,
+          error: st.error || undefined,
+          body: st.body ? st.body.slice(0, 2000) : undefined,
+        }));
+        const result: ScheduleRunResult = {
+          status: failed ? failed.status : last.status,
+          statusText: failed
+            ? failed.error || `${failed.name} 失败`
+            : `链式完成 ${steps.length} 步`,
+          durationMs: steps.reduce((sum, st) => sum + st.durationMs, 0),
+          error: failed ? failed.error : undefined,
+          body: JSON.stringify(summary, null, 2),
+          firedAt,
+          at: last.at,
+        };
+        this.store.recordResult(id, result);
+        return;
+      }
+
+      // ── 单接口模式 ──
       const resp = await sendRequest(s.input);
       const result: ScheduleRunResult = {
         status: resp.status,
         statusText: resp.statusText,
         durationMs: resp.durationMs,
+        body: resp.body && resp.body.length > MAX_HISTORY_BODY
+          ? resp.body.slice(0, MAX_HISTORY_BODY) + '\n…(已截断)'
+          : resp.body,
         firedAt,
         at: resp.at,
       };

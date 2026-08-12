@@ -8,7 +8,23 @@ interface Props {
   placeholderValue?: string;
 }
 
-type Entry = [string, string];
+interface Entry {
+  id: string;
+  k: string;
+  v: string;
+}
+
+let uidSeq = 0;
+function newId(): string {
+  uidSeq += 1;
+  return `kv_${Date.now().toString(36)}_${uidSeq}`;
+}
+
+function recordsToEntries(value: Record<string, string>): Entry[] {
+  const list = Object.entries(value).map(([k, v]) => ({ id: newId(), k, v }));
+  // 末尾保留一行空行，方便直接继续录入。
+  return [...list, { id: newId(), k: '', v: '' }];
+}
 
 function sameRecord(a: Record<string, string>, b: Record<string, string>): boolean {
   const ak = Object.keys(a);
@@ -24,17 +40,16 @@ export function KeyValueEditor({
   placeholderKey = 'key',
   placeholderValue = 'value',
 }: Props) {
-  // 内部维护可包含空行的 entries，保证「添加一行」后能正常渲染与编辑。
-  // 仅在提交给父组件时剔除空 key 行，父组件的 value（Record）保持干净。
-  const [entries, setEntries] = useState<Entry[]>(() => Object.entries(value));
+  // 内部维护带稳定 id 的 entries（可包含空行），保证「添加一行」后正常渲染与编辑，
+  // 且中间删除/编辑不会因 index 复用导致输入错位。仅在提交父组件时剔除空 key 行。
+  const [entries, setEntries] = useState<Entry[]>(() => recordsToEntries(value));
 
   // 当父组件的值发生外部变更（例如 curl 导入）时，重新同步内部状态。
-  // 通过对比「父值」与「内部 entries 去空后」是否一致来判断是否为外部变更。
   useEffect(() => {
     const stripped: Record<string, string> = {};
-    for (const [k, v] of entries) if (k.trim()) stripped[k] = v;
+    for (const e of entries) if (e.k.trim()) stripped[e.k] = e.v;
     if (!sameRecord(value, stripped)) {
-      setEntries(Object.entries(value));
+      setEntries(recordsToEntries(value));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value]);
@@ -42,38 +57,35 @@ export function KeyValueEditor({
   const commit = (next: Entry[]) => {
     setEntries(next);
     const obj: Record<string, string> = {};
-    for (const [k, v] of next) if (k.trim()) obj[k] = v;
+    for (const e of next) if (e.k.trim()) obj[e.k] = e.v;
     onChange(obj);
   };
 
-  const setAt = (idx: number, field: 0 | 1, text: string) => {
-    const next = entries.map((e, i) =>
-      i === idx ? ([field === 0 ? text : e[0], field === 1 ? text : e[1]] as Entry) : e
-    );
-    commit(next);
+  const setAt = (id: string, field: 'k' | 'v', text: string) => {
+    commit(entries.map((e) => (e.id === id ? { ...e, [field]: text } : e)));
   };
 
-  const removeAt = (idx: number) => commit(entries.filter((_, i) => i !== idx));
-  const addRow = () => commit([...entries, ['', '']]);
+  const removeAt = (id: string) => commit(entries.filter((e) => e.id !== id));
+  const addRow = () => commit([...entries, { id: newId(), k: '', v: '' }]);
 
   return (
     <div className="space-y-1.5">
-      {entries.map(([k, v], i) => (
-        <div key={i} className="flex items-center gap-2">
+      {entries.map((e) => (
+        <div key={e.id} className="flex items-center gap-2">
           <input
-            value={k}
-            onChange={(e) => setAt(i, 0, e.target.value)}
+            value={e.k}
+            onChange={(ev) => setAt(e.id, 'k', ev.target.value)}
             placeholder={placeholderKey}
             className="w-2/5 rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-brand/60"
           />
           <input
-            value={v}
-            onChange={(e) => setAt(i, 1, e.target.value)}
+            value={e.v}
+            onChange={(ev) => setAt(e.id, 'v', ev.target.value)}
             placeholder={placeholderValue}
             className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-1.5 text-[12.5px] outline-none focus:border-brand/60"
           />
           <button
-            onClick={() => removeAt(i)}
+            onClick={() => removeAt(e.id)}
             className="shrink-0 rounded-md p-1.5 text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
           >
             <X size={14} />
