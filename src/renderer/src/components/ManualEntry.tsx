@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X, ChevronDown, ChevronUp, Code2 } from 'lucide-react';
 import type { CaptureInput } from '../../../shared/types';
 import { parseCurl } from '../../../shared/curl';
+import { Select } from './ui/Select';
 import { KeyValueEditor } from './KeyValueEditor';
 
 interface Props {
@@ -105,10 +106,10 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
       onClick={onClose}
     >
       <div
-        className="glass w-full max-w-lg rounded-2xl p-5 shadow-2xl"
+        className="glass flex max-h-[90vh] w-full max-w-lg flex-col rounded-2xl p-5 shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex shrink-0 items-center justify-between">
           <h2 className="text-[15px] font-semibold text-slate-100">手动录入接口</h2>
           <button
             onClick={onClose}
@@ -118,7 +119,7 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
           </button>
         </div>
 
-        <div className="space-y-3">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {/* 从 curl 导入 */}
           <div className="rounded-xl border border-slate-700/40 bg-slate-800/30">
             <button
@@ -159,17 +160,17 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
           </div>
 
           <div className="flex gap-2">
-            <select
+            <Select
               value={method}
               onChange={(e) => setMethod(e.target.value)}
-              className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-2 text-[13px] outline-none focus:border-brand/60"
+              wrapperClassName="relative shrink-0"
             >
               {METHODS.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
-            </select>
+            </Select>
             <input
               value={url}
               onChange={(e) => handleUrl(e.target.value)}
@@ -207,7 +208,7 @@ export function ManualEntry({ onClose, onSubmit }: Props) {
           </Section>
         </div>
 
-        <div className="mt-5 flex justify-end gap-2">
+        <div className="mt-4 flex shrink-0 justify-end gap-2 border-t border-slate-700/40 pt-4">
           <button
             onClick={onClose}
             className="rounded-lg px-4 py-2 text-[13px] text-slate-300 transition hover:bg-slate-700/50 cursor-pointer"

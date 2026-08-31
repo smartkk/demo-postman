@@ -13,6 +13,7 @@ import type {
   RecordSource,
   ResponseRecord,
   ScheduleConfig,
+  ScheduleRunResult,
 } from '../shared/types';
 
 const api = {
@@ -124,17 +125,26 @@ const api = {
   setDataDir: (dir: string): Promise<boolean> =>
     ipcRenderer.invoke('app:setDataDir', dir),
   relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
-  onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void): void => {
-    ipcRenderer.on('store:updated', (_e, list, folders) => cb(list, folders));
+  onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void): (() => void) => {
+    const handler = (_e: unknown, list: InterfaceRecord[], folders: string[]) =>
+      cb(list, folders);
+    ipcRenderer.on('store:updated', handler);
+    return () => ipcRenderer.removeListener('store:updated', handler);
   },
-  onProxyStatus: (cb: (s: ProxyStatus) => void): void => {
-    ipcRenderer.on('proxy:status', (_e, s) => cb(s));
+  onProxyStatus: (cb: (s: ProxyStatus) => void): (() => void) => {
+    const handler = (_e: unknown, s: ProxyStatus) => cb(s);
+    ipcRenderer.on('proxy:status', handler);
+    return () => ipcRenderer.removeListener('proxy:status', handler);
   },
-  onExtensionStatus: (cb: (s: ExtensionStatus) => void): void => {
-    ipcRenderer.on('extension:status', (_e, s) => cb(s));
+  onExtensionStatus: (cb: (s: ExtensionStatus) => void): (() => void) => {
+    const handler = (_e: unknown, s: ExtensionStatus) => cb(s);
+    ipcRenderer.on('extension:status', handler);
+    return () => ipcRenderer.removeListener('extension:status', handler);
   },
-  onSettings: (cb: (s: CaptureSettings) => void): void => {
-    ipcRenderer.on('settings:updated', (_e, s) => cb(s));
+  onSettings: (cb: (s: CaptureSettings) => void): (() => void) => {
+    const handler = (_e: unknown, s: CaptureSettings) => cb(s);
+    ipcRenderer.on('settings:updated', handler);
+    return () => ipcRenderer.removeListener('settings:updated', handler);
   },
   /* ── 定时调度 ── */
   listSchedules: (): Promise<ScheduleConfig[]> =>
@@ -147,8 +157,12 @@ const api = {
     ipcRenderer.invoke('schedule:toggle', id),
   getScheduleHistory: (id: string): Promise<ScheduleConfig['history']> =>
     ipcRenderer.invoke('schedule:history', id),
-  onSchedules: (cb: (list: ScheduleConfig[]) => void): void => {
-    ipcRenderer.on('schedule:updated', (_e, list) => cb(list));
+  runSchedule: (id: string): Promise<ScheduleRunResult | null> =>
+    ipcRenderer.invoke('schedule:runNow', id),
+  onSchedules: (cb: (list: ScheduleConfig[]) => void): (() => void) => {
+    const handler = (_e: unknown, list: ScheduleConfig[]) => cb(list);
+    ipcRenderer.on('schedule:updated', handler);
+    return () => ipcRenderer.removeListener('schedule:updated', handler);
   },
 };
 

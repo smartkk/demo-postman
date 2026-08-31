@@ -65,9 +65,17 @@ export class InterfaceStore {
     this.load();
   }
 
-  /** 设置去重策略：true=按完整 URL（含 query）去重。 */
+  /** 设置去重策略：true=按完整 URL（含 query）去重。切换后重建索引，避免旧键失效产生重复记录。 */
   setDedupMode(fullUrl: boolean): void {
     this.dedupByFullUrl = fullUrl;
+    this.captureIndex.clear();
+    for (const r of this.records.values()) {
+      if (r.source === 'captured') {
+        const sp = new URLSearchParams(r.query || {}).toString();
+        const search = sp ? `?${sp}` : '';
+        this.captureIndex.set(this.buildKey(r.method, r.host, r.path, search), r.id);
+      }
+    }
   }
 
   private buildKey(method: string, host: string, p: string, search = ''): string {

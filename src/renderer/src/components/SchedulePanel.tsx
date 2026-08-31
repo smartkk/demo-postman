@@ -1,8 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
-import { X, Clock, Plus, Play, Pause, Trash2, ChevronDown, ChevronRight, History, Edit2, Calendar, Eye } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { History, Calendar, Plus, Save, RotateCcw, Send } from 'lucide-react';
 import { DateTimeField } from './DateTimeField';
+import { Select } from './ui/Select';
 import { BodyView } from './BodyView';
 import { api } from '../api/client';
+import { showToast } from './ui/Toast';
 import type {
   ScheduleConfig,
   ScheduleRunResult,
@@ -20,7 +22,7 @@ import type {
 
 interface Props {
   records: InterfaceRecord[];
-  onClose: () => void;
+  activeId: string | null;
 }
 
 const DEFAULT_INTERVALS = [
@@ -50,7 +52,7 @@ function recordToInput(r: InterfaceRecord): CaptureInput {
   };
 }
 
-export function SchedulePanel({ records, onClose }: Props) {
+export function SchedulePanel({ records, activeId }: Props) {
   const [schedules, setSchedules] = useState<ScheduleConfig[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,18 +60,37 @@ export function SchedulePanel({ records, onClose }: Props) {
   const [selectedRecId, setSelectedRecId] = useState('');
   const [intervalSec, setIntervalSec] = useState(60);
   const [startAt, setStartAt] = useState('');
-  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [historyMap, setHistoryMap] = useState<Record<string, ScheduleRunResult[]>>({});
-  const [viewResult, setViewResult] = useState<ScheduleRunResult | null>(null);
+  const [expandedResultId, setExpandedResultId] = useState<string | null>(null);
   const [mode, setMode] = useState<'single' | 'chain'>('single');
   const [chainId, setChainId] = useState('');
   const [chains, setChains] = useState<ChainProject[]>([]);
+  const [savedTip, setSavedTip] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   useEffect(() => {
     api.listSchedules().then(setSchedules);
     api.onSchedules(setSchedules);
     api.listChains().then(setChains);
   }, []);
+
+  // 根据左侧栏选中的定时任务加载编辑区；activeId 为 null 表示「新建」
+  useEffect(() => {
+    if (activeId) {
+      editSchedule(activeId);
+    } else {
+      // 新建模式：直接展开空白表单，保持与其它面板一致的「左侧 + 新建」交互
+      setEditingId(null);
+      setShowAdd(true);
+      setName('');
+      setSelectedRecId('');
+      setStartAt('');
+      setMode('single');
+      setChainId('');
+      setIntervalSec(60);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
 
   const addSchedule = async () => {
     if (!name.trim()) return;
@@ -81,8 +102,11 @@ export function SchedulePanel({ records, onClose }: Props) {
       if (!record) return;
     }
     // 编辑模式：复用原 id、保留 createdAt/runCount；否则新建
+    // 直接读取最新列表，避免依赖本组件内可能滞后的 schedules 状态
+    const latest = await api.listSchedules();
+    setSchedules(latest);
     const existing = editingId
-      ? schedules.find((s) => s.id === editingId)
+      ? latest.find((s) => s.id === editingId)
       : undefined;
     const config: ScheduleConfig = {
       id: existing ? existing.id : genId(),
@@ -100,18 +124,55 @@ export function SchedulePanel({ records, onClose }: Props) {
     }
     const updated = await api.saveSchedule(config);
     setSchedules(updated);
-    setName('');
-    setSelectedRecId('');
-    setIntervalSec(60);
-    setStartAt('');
-    setChainId('');
-    setMode('single');
-    setShowAdd(false);
-    setEditingId(null);
+    setSavedTip(true);
+    window.setTimeout(() => setSavedTip(false), 1800);
+    if (existing) {
+      // 编辑模式：保留表单，便于继续微调
+      setShowAdd(true);
+    } else {
+      // 新建模式：清空并收起表单
+      setName('');
+      setSelectedRecId('');
+      setIntervalSec(60);
+      setStartAt('');
+      setChainId('');
+      setMode('single');
+      setShowAdd(false);
+      setEditingId(null);
+    }
+  };
+
+  const handleRunNow = async (id: string) => {
+    if (sendingId) return;
+    setSendingId(id);
+    try {
+      const result = await api.runSchedule(id);
+      if (result) {
+        // 立即刷新该任务执行历史与概要
+        api.getScheduleHistory(id).then((h) =>
+          setHistoryMap((m) => ({ ...m, [id]: h ?? [] })),
+        );
+        if (result.status >= 200 && result.status < 400) {
+          showToast(`「立即发送」成功，状态码 ${result.status}`, 'success');
+        } else if (result.error) {
+          showToast(`发送失败：${result.error}`, 'error');
+        } else {
+          showToast(`请求返回 ${result.status} ${result.statusText}`, 'info');
+        }
+      }
+    } catch (err) {
+      console.error('[SchedulePanel] 立即发送失败：', err);
+      showToast('立即发送失败：' + (err instanceof Error ? err.message : String(err)), 'error');
+    } finally {
+      setSendingId(null);
+    }
   };
 
   const editSchedule = async (id: string) => {
-    const s = schedules.find((x) => x.id === id);
+    // 直接读取最新数据，避免依赖本组件内可能尚未加载完成的 schedules 状态
+    const latest = await api.listSchedules();
+    setSchedules(latest);
+    const s = latest.find((x) => x.id === id);
     if (!s) return;
     // 回填表单：尝试找到对应的本地接口记录
     const rec = records.find(
@@ -139,65 +200,17 @@ export function SchedulePanel({ records, onClose }: Props) {
     }
     setEditingId(id);
     setShowAdd(true);
+    // 进入编辑即加载该任务执行历史，保证历史区有数据
+    api.getScheduleHistory(id).then((h) =>
+      setHistoryMap((m) => ({ ...m, [id]: h ?? [] })),
+    );
   };
-
-  const toggleSchedule = async (id: string) => {
-    await api.toggleSchedule(id);
-  };
-
-  const deleteSchedule = async (id: string) => {
-    await api.deleteSchedule(id);
-    if (expandedId === id) setExpandedId(null);
-  };
-
-  const toggleExpand = useCallback(async (id: string) => {
-    if (expandedId === id) {
-      setExpandedId(null);
-      return;
-    }
-    setExpandedId(id);
-    // 按需加载历史（避免每次刷新都拉取）
-    if (!historyMap[id]) {
-      const hist = (await api.getScheduleHistory(id)) ?? [];
-      setHistoryMap((m) => ({ ...m, [id]: hist }));
-    }
-  }, [expandedId, historyMap]);
 
   const formatInterval = (sec: number): string => {
     if (sec < 60) return `${sec} 秒`;
     if (sec < 3600) return `${Math.round(sec / 60)} 分钟`;
     if (sec < 86400) return `${(sec / 3600).toFixed(1)} 小时`;
     return `${Math.round(sec / 86400)} 天`;
-  };
-
-  const nextRuns = (s: ScheduleConfig, n: number): Date[] => {
-    if (!s.enabled) return [];
-    const now = Date.now();
-    // 容错：间隔缺失或非数字时按 1 秒兜底，避免产生 Invalid Date 导致渲染崩溃
-    const interval = (Number.isFinite(s.intervalSeconds) ? s.intervalSeconds : 1) * 1000;
-    const out: Date[] = [];
-
-    // 基准时间：设置了 startAt（无论过去或未来）都以它为相位锚点对齐，
-    // 保证「下次时间」始终以指定时间为准；未设置才退回创建时间。
-    let anchor = Number.NaN;
-    let useStart = false;
-    if (s.startAt) {
-      const start = new Date(s.startAt).getTime();
-      if (!Number.isNaN(start)) {
-        anchor = start;
-        useStart = true;
-      }
-    }
-    if (!useStart) {
-      const created = new Date(s.createdAt).getTime();
-      anchor = Number.isNaN(created) ? now : created;
-    }
-
-    // 基于基准时间按间隔推算后续执行时刻，并对齐到当前时刻之后的首个
-    let next = useStart ? anchor : anchor + interval;
-    while (next <= now) next += interval;
-    for (let i = 0; i < n; i++) out.push(new Date(next + i * interval));
-    return out;
   };
 
   const formatTime = (iso: string): string => {
@@ -229,413 +242,311 @@ export function SchedulePanel({ records, onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="glass max-h-[88vh] w-[520px] max-w-[92vw] overflow-y-auto rounded-2xl border border-slate-700/50 p-5 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 标题栏 */}
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-100">
-            <Clock size={16} className="text-brand-light" /> 定时调度
-          </h2>
-          <button
-            onClick={onClose}
-            className="cursor-pointer rounded-md p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200"
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
 
-        {/* 添加按钮 */}
-        {!showAdd && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="mb-3 flex w-full cursor-pointer items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-600 py-2 text-[13px] text-slate-400 transition hover:border-slate-500 hover:text-slate-300"
-          >
-            <Plus size={14} /> 新建定时任务
-          </button>
-        )}
-
-        {/* 新建/编辑表单 */}
+        {/* 新建/编辑表单（由左侧栏 + 触发 activeId=null 进入新建） */}
         {showAdd && (
-          <div className="mb-3 space-y-3 rounded-xl bg-slate-800/40 p-3">
-            <div className="text-[13px] font-medium text-slate-200">
-              {editingId ? '编辑定时任务' : '新建定时任务'}
+          <div className={`space-y-3 rounded-xl border border-slate-700/40 bg-slate-800/30 p-4 ${editingId ? 'shrink-0' : 'flex min-h-0 flex-1 flex-col'}`}>
+            <div className="flex items-center gap-2 text-[13px] font-medium text-slate-200">
+              {editingId ? <><Calendar size={14} className="text-brand-light" /> 编辑定时任务</>
+                : <><Plus size={14} className="text-brand-light" /> 新建定时任务</>}
             </div>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="任务名称（如：健康检查）"
-              className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 text-[13px] text-slate-200 outline-none transition focus:border-brand/60"
-            />
-            {/* 执行类型切换 */}
-            <div className="flex gap-1.5">
-              <button
-                type="button"
-                onClick={() => setMode('single')}
-                className={`flex-1 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
-                  mode === 'single'
-                    ? 'bg-brand/25 text-brand-light'
-                    : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
-                }`}
-              >
-                单接口
-              </button>
-              <button
-                type="button"
-                onClick={() => setMode('chain')}
-                className={`flex-1 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
-                  mode === 'chain'
-                    ? 'bg-brand/25 text-brand-light'
-                    : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
-                }`}
-              >
-                链式任务
-              </button>
-            </div>
-            {mode === 'single' ? (
-              <select
-                value={selectedRecId}
-                onChange={(e) => setSelectedRecId(e.target.value)}
-                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 text-[13px] text-slate-200 outline-none transition focus:border-brand/60"
-              >
-                <option value="">选择要调用的接口…</option>
-                {records.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.method} {r.name || r.path || r.url}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <select
-                value={chainId}
-                onChange={(e) => setChainId(e.target.value)}
-                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 text-[13px] text-slate-200 outline-none transition focus:border-brand/60"
-              >
-                <option value="">选择要执行的链式任务…</option>
-                {chains.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}（{c.steps.length} 步）
-                  </option>
-                ))}
-              </select>
-            )}
+
+            {/* 任务名称 */}
             <div>
-              <label className="mb-1 block text-[12px] text-slate-400">调用间隔</label>
-              <div className="flex flex-wrap gap-1.5">
-                {DEFAULT_INTERVALS.map((it) => (
-                  <button
-                    key={it.value}
-                    onClick={() => setIntervalSec(it.value)}
-                    className={`cursor-pointer rounded-md px-2.5 py-1 text-[11px] font-medium transition ${
-                      intervalSec === it.value
-                        ? 'bg-brand/25 text-brand-light'
-                        : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
-                    }`}
-                  >
-                    {it.label}
-                  </button>
-                ))}
+              <label className="mb-1 block text-[12px] text-slate-400">任务名称</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="如：健康检查 / 每小时同步"
+                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 text-[13px] text-slate-200 outline-none transition focus:border-brand/60"
+              />
+            </div>
+
+            {/* 执行类型 */}
+            <div>
+              <label className="mb-1 block text-[12px] text-slate-400">执行类型</label>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setMode('single')}
+                  className={`flex-1 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
+                    mode === 'single'
+                      ? 'bg-brand/25 text-brand-light'
+                      : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
+                  }`}
+                >
+                  单接口
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMode('chain')}
+                  className={`flex-1 cursor-pointer rounded-md px-3 py-1.5 text-[12px] font-medium transition ${
+                    mode === 'chain'
+                      ? 'bg-brand/25 text-brand-light'
+                      : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
+                  }`}
+                >
+                  链式任务
+                </button>
               </div>
             </div>
+
+            {/* 目标选择 */}
             <div>
-              <div className="mb-1 flex items-center justify-between">
-                <label className="flex items-center gap-1 text-[12px] text-slate-400">
-                  <Calendar size={12} /> 开始执行时间（可选）
-                </label>
-                {startAt && (
-                  <button
-                    onClick={() => setStartAt('')}
-                    className="text-[11px] text-slate-500 transition hover:text-slate-300"
-                  >
-                    清除
-                  </button>
-                )}
-              </div>
-              <DateTimeField value={startAt} onChange={setStartAt} />
-              <p className="mt-1 text-[11px] text-slate-400">
-                留空则保存后立即按间隔调度；设置未来时间则等待到该时刻首次执行。
-              </p>
+              <label className="mb-1 block text-[12px] text-slate-400">
+                {mode === 'single' ? '调用接口' : '链式任务'}
+              </label>
+              {mode === 'single' ? (
+                <Select
+                  value={selectedRecId}
+                  onChange={(e) => setSelectedRecId(e.target.value)}
+                >
+                  <option value="">选择要调用的接口…</option>
+                  {records.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.method} {r.name || r.path || r.url}
+                    </option>
+                  ))}
+                </Select>
+              ) : (
+                <Select
+                  value={chainId}
+                  onChange={(e) => setChainId(e.target.value)}
+                >
+                  <option value="">选择要执行的链式任务…</option>
+                  {chains.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}（{c.steps.length} 步）
+                    </option>
+                  ))}
+                </Select>
+              )}
             </div>
-            <div className="flex gap-2">
+
+            {/* 间隔 + 开始时间，两列并排，信息更紧凑 */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-[12px] text-slate-400">调用间隔</label>
+                <div className="flex flex-wrap gap-1">
+                  {DEFAULT_INTERVALS.map((it) => (
+                    <button
+                      key={it.value}
+                      onClick={() => setIntervalSec(it.value)}
+                      className={`cursor-pointer rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                        intervalSec === it.value
+                          ? 'bg-brand/25 text-brand-light'
+                          : 'bg-slate-800/60 text-slate-400 hover:bg-slate-700/50'
+                      }`}
+                    >
+                      {it.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <div className="mb-1 flex items-center justify-between">
+                  <label className="flex items-center gap-1 text-[12px] text-slate-400">
+                    <Calendar size={12} /> 开始时间
+                  </label>
+                  {startAt && (
+                    <button
+                      onClick={() => setStartAt('')}
+                      className="text-[11px] text-slate-500 transition hover:text-slate-300"
+                    >
+                      清除
+                    </button>
+                  )}
+                </div>
+                <DateTimeField value={startAt} onChange={setStartAt} />
+                <p className="mt-1 text-[10.5px] leading-tight text-slate-400">
+                  留空则保存后立即调度
+                </p>
+              </div>
+            </div>
+
+            {/* 操作 */}
+            <div className="mt-auto flex justify-end gap-2 pt-1">
               <button
                 onClick={addSchedule}
                 disabled={!name.trim() || (mode === 'chain' ? !chainId : !selectedRecId)}
-                className="flex-1 cursor-pointer rounded-lg bg-brand/80 px-3 py-2 text-[13px] font-medium text-white transition hover:bg-brand disabled:opacity-40"
+                className="group relative flex shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-lg bg-gradient-to-r from-brand to-brand-light px-4 py-2 text-[13px] font-semibold text-white shadow-lg shadow-brand/20 transition-all duration-150 hover:shadow-xl hover:shadow-brand/30 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 disabled:shadow-none"
               >
-                {editingId ? '保存修改' : '添加'}
+                <span className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/20 to-transparent transition-transform duration-500 group-hover:translate-x-full" />
+                <Save size={14} className="relative" />
+                <span className="relative">{savedTip ? '已保存 ✓' : editingId ? '保存修改' : '添加任务'}</span>
               </button>
+              {editingId && (
+                <button
+                  onClick={() => handleRunNow(editingId)}
+                  disabled={!!sendingId}
+                  title="立即发送一次请求"
+                  className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg bg-emerald-500/90 px-3 py-2 text-[13px] font-semibold text-white shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-500 active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
+                >
+                  {sendingId === editingId ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    <Send size={13} />
+                  )}
+                  立即发送
+                </button>
+              )}
               <button
                 onClick={() => {
-                  setShowAdd(false);
                   setName('');
                   setSelectedRecId('');
                   setStartAt('');
                   setEditingId(null);
+                  setMode('single');
+                  setChainId('');
+                  setIntervalSec(60);
                 }}
-                className="cursor-pointer rounded-lg bg-slate-700/50 px-3 py-2 text-[13px] text-slate-300 transition hover:bg-slate-700"
+                className="flex shrink-0 items-center justify-center gap-1.5 rounded-lg border border-slate-600/60 bg-slate-700/40 px-3 py-2 text-[13px] font-medium text-slate-300 transition hover:border-slate-500 hover:bg-slate-700/60 active:scale-[0.98]"
               >
-                取消
+                <RotateCcw size={13} /> 清空
               </button>
             </div>
           </div>
         )}
 
-        {/* 任务列表 */}
-        {schedules.length === 0 ? (
-          <div className="py-8 text-center text-[13px] text-slate-400">
-            暂无定时任务，点击上方按钮新建
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {schedules.map((s) => {
-              const badge = lastResultBadge(s);
-              const isExpanded = expandedId === s.id;
-              const history = historyMap[s.id] ?? [];
-              // 倒序展示（最新在前）
-              const displayHistory = [...history].reverse();
-              return (
-                <div
-                  key={s.id}
-                  className={`rounded-xl border transition ${
-                    s.enabled
-                      ? 'border-slate-700/50 bg-slate-800/30'
-                      : 'border-slate-800 bg-slate-800/20 opacity-60'
-                  }`}
-                >
-                  <div className="flex items-center justify-between p-3">
-                    {/* 左侧：名称 + 请求摘要 */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        {s.chainId ? (
-                          <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-bold text-purple-300">
-                            链式
-                          </span>
-                        ) : (
-                          <span
-                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                              s.enabled ? 'text-brand-light' : 'text-slate-400'
-                            }`}
-                          >
-                            {s.input.method}
-                          </span>
-                        )}
-                        <span className="truncate text-[13px] font-medium text-slate-200">
-                          {s.name}
-                        </span>
-                      </div>
-                      <div className="mt-0.5 truncate text-[11px] text-slate-500">
-                        {s.chainId
-                          ? chains.find((c) => c.id === s.chainId)?.name ?? '（已删除的链式任务）'
-                          : `${s.input.method} ${s.input.url}`}
-                      </div>
-                      <p className="mt-0.5 truncate pl-1 text-[11px] text-slate-400">
-                        {s.input.url}
-                      </p>
-                      {/* 运行信息 */}
-                      <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-1 text-[11px]">
-                        <span className="text-slate-400">
-                          每 {formatInterval(s.intervalSeconds)}
-                        </span>
-                        {(() => {
-                          const runs = nextRuns(s, 2);
-                          if (!s.enabled)
-                            return <span className="text-slate-300">已暂停</span>;
-                          if (runs.length === 0)
-                            return <span className="text-slate-300">排队中…</span>;
+        {/* 选中任务：概要 + 执行历史（列表已移至左侧栏） */}
+        {editingId && (() => {
+          const s = schedules.find((x) => x.id === editingId);
+          if (!s) return null;
+          const history = historyMap[s.id] ?? [];
+          const displayHistory = [...history].reverse();
+          const badge = lastResultBadge(s);
+          return (
+            <div className="mt-3 flex min-h-0 flex-1 flex-col rounded-xl border border-slate-700/40 bg-slate-800/30">
+              {/* 概要头部 */}
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700/40 px-3 py-2.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  {s.chainId ? (
+                    <span className="rounded bg-purple-500/20 px-1.5 py-0.5 text-[10px] font-bold text-purple-300">
+                      链式
+                    </span>
+                  ) : (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
+                        s.enabled ? 'text-brand-light' : 'text-slate-400'
+                      }`}
+                    >
+                      {s.input.method}
+                    </span>
+                  )}
+                  <span className="truncate text-[13px] font-medium text-slate-200">{s.name}</span>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => handleRunNow(s.id)}
+                    disabled={!!sendingId}
+                    title="立即发送一次请求"
+                    className="flex items-center gap-1 rounded-md bg-emerald-500/90 px-2 py-1 text-[11px] font-semibold text-white shadow transition hover:bg-emerald-500 active:scale-[0.97] disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {sendingId === s.id ? (
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                    ) : (
+                      <Send size={11} />
+                    )}
+                    立即发送
+                  </button>
+                  <span className={`rounded-full px-1.5 py-px text-[10px] ${badge.cls}`}>
+                    {badge.text}
+                  </span>
+                </div>
+              </div>
+              {/* 元信息 */}
+              <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-slate-700/40 px-3 py-1.5 text-[11px] text-slate-400">
+                <span>每 {formatInterval(s.intervalSeconds)}</span>
+                <span>已执行 {s.runCount} 次</span>
+                <span>状态 {s.enabled ? '运行中' : '已停用'}</span>
+              </div>
+
+              {/* 历史区：占满剩余空间，内部滚动 */}
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-[11px] text-slate-400">
+                  <History size={12} />
+                  {displayHistory.length === 0 ? '执行记录' : `最近 ${displayHistory.length} 次执行`}
+                </div>
+                {displayHistory.length === 0 ? (
+                  <div className="flex flex-1 items-center justify-center py-4 text-[11.5px] text-slate-400">
+                    暂无执行记录，保存后开始调度
+                  </div>
+                ) : (
+                  <div className="min-h-0 flex-1 overflow-y-auto px-1 pb-1">
+                    <table className="w-full text-[11px]">
+                      <thead className="sticky top-0 bg-slate-800/95 text-slate-400">
+                        <tr className="border-b border-slate-700/50">
+                          <th className="px-2 py-1.5 text-left font-medium">#</th>
+                          <th className="px-2 py-1.5 text-left font-medium">执行时间</th>
+                          <th className="px-2 py-1.5 text-left font-medium">状态</th>
+                          <th className="px-2 py-1.5 text-right font-medium">耗时</th>
+                          <th className="px-2 py-1.5 text-left font-medium">详情</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {displayHistory.map((r, i) => {
+                          const stBadge = resultStatusBadge(r);
+                          const open = expandedResultId === `${s.id}__${i}`;
                           return (
                             <>
-                              <span className="text-slate-300">
-                                下次 {formatTime(runs[0].toISOString())}
-                              </span>
-                              {runs[1] && (
-                                <span className="text-slate-300">
-                                  再 {formatTime(runs[1].toISOString())}
-                                </span>
+                              <tr
+                                key={i}
+                                onClick={() =>
+                                  setExpandedResultId(open ? null : `${s.id}__${i}`)
+                                }
+                                className={`cursor-pointer border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20 ${
+                                  open ? 'bg-slate-700/30' : ''
+                                }`}
+                              >
+                                <td className="px-2 py-1.5 text-slate-300">{displayHistory.length - i}</td>
+                                <td className="whitespace-nowrap px-2 py-1.5 text-slate-400" title={`响应完成：${formatTime(r.at)}`}>
+                                  {formatTime(r.firedAt || r.at)}
+                                </td>
+                                <td className="px-2 py-1.5">
+                                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${stBadge.cls}`}>
+                                    {stBadge.text}
+                                  </span>
+                                </td>
+                                <td className="px-2 py-1.5 text-right text-slate-400">{r.durationMs}ms</td>
+                                <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400" title={r.error ?? r.statusText ?? ''}>
+                                  {r.error ?? r.statusText ?? '-'}
+                                </td>
+                              </tr>
+                              {open && (
+                                <tr key={`${i}__d`} className="border-b border-slate-800/60 bg-slate-900/40">
+                                  <td colSpan={5} className="px-3 py-2">
+                                    <div className="mb-2 flex flex-wrap items-center gap-3 text-[11px]">
+                                      <span className={`rounded-full px-2 py-0.5 ${stBadge.cls}`}>
+                                        {stBadge.text}
+                                      </span>
+                                      <span className="text-slate-400">耗时 {r.durationMs}ms</span>
+                                      <span className="text-slate-400">触发 {formatTime(r.firedAt)}</span>
+                                      {r.error && <span className="text-rose-400">错误：{r.error}</span>}
+                                    </div>
+                                    {r.body ? (
+                                      <BodyView body={r.body} contentType={undefined} emptyHint="无响应体" />
+                                    ) : (
+                                      <div className="py-2 text-center text-[11.5px] text-slate-600">
+                                        本次响应无返回内容
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
                               )}
                             </>
                           );
-                        })()}
-                        <span className="text-slate-300">
-                          已执行 {s.runCount} 次
-                        </span>
-                        {s.startAt && new Date(s.startAt).getTime() > Date.now() && (
-                          <span className="text-amber-400/80">
-                            始于 {formatTime(s.startAt)}
-                          </span>
-                        )}
-                        <span className={`rounded-full px-1.5 py-px text-[10px] ${badge.cls}`}>
-                          {badge.text}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* 右侧：操作按钮 */}
-                    <div className="ml-3 flex items-center gap-1">
-                      <button
-                        onClick={() => editSchedule(s.id)}
-                        title="编辑"
-                        className="cursor-pointer rounded-md p-1.5 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200"
-                      >
-                        <Edit2 size={15} />
-                      </button>
-                      <button
-                        onClick={() => toggleSchedule(s.id)}
-                        title={s.enabled ? '暂停' : '启用'}
-                        className={`cursor-pointer rounded-md p-1.5 transition ${
-                          s.enabled
-                            ? 'text-brand-light hover:bg-brand/10'
-                            : 'text-slate-400 hover:bg-slate-700/50'
-                        }`}
-                      >
-                        {s.enabled ? <Pause size={15} /> : <Play size={15} />}
-                      </button>
-                      <button
-                        onClick={() => deleteSchedule(s.id)}
-                        className="cursor-pointer rounded-md p-1.5 text-slate-400 transition hover:bg-red-500/10 hover:text-red-400"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                      {/* 展开历史 */}
-                      <button
-                        onClick={() => toggleExpand(s.id)}
-                        className="cursor-pointer rounded-md p-1.5 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-300"
-                        title={isExpanded ? '收起历史' : '查看执行历史'}
-                      >
-                        {isExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
-                      </button>
-                    </div>
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-
-                  {/* ── 历史记录表格 ── */}
-                  {isExpanded && (
-                    <div className="border-t border-slate-700/40 px-3 pb-3 pt-2">
-                      {displayHistory.length === 0 ? (
-                        <div className="py-3 text-center text-[11.5px] text-slate-400">
-                          暂无执行记录
-                        </div>
-                      ) : (
-                        <>
-                          <div className="mb-1 flex items-center gap-1.5 text-[11px] text-slate-400">
-                            <History size={12} />
-                            最近 {displayHistory.length} 次执行
-                          </div>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-[11px]">
-                              <thead>
-                                <tr className="border-b border-slate-700/50 text-slate-400">
-                                  <th className="py-1.5 pr-2 text-left font-medium">#</th>
-                                  <th className="py-1.5 pr-3 text-left font-medium">执行时间</th>
-                                  <th className="py-1.5 pr-3 text-left font-medium">状态</th>
-                                  <th className="py-1.5 pr-3 text-right font-medium">耗时</th>
-                                  <th className="py-1.5 text-left font-medium">详情</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {displayHistory.map((r, i) => {
-                                  const stBadge = resultStatusBadge(r);
-                                  return (
-                                    <tr
-                                      key={i}
-                                      className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
-                                    >
-                                      <td className="py-1.5 pr-2 text-slate-300">
-                                        {displayHistory.length - i}
-                                      </td>
-                                      <td className="whitespace-nowrap py-1.5 pr-3 text-slate-400" title={`响应完成：${formatTime(r.at)}`}>
-                                        {formatTime(r.firedAt || r.at)}
-                                      </td>
-                                      <td className="py-1.5 pr-3">
-                                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${stBadge.cls}`}>
-                                          {stBadge.text}
-                                        </span>
-                                      </td>
-                                      <td className="py-1.5 pr-3 text-right text-slate-400">
-                                        {r.durationMs}ms
-                                      </td>
-                                      <td className="max-w-[200px] truncate py-1.5 text-slate-400">
-                                        <div className="flex items-center gap-2">
-                                          <span className="truncate" title={r.error ?? r.statusText ?? ''}>
-                                            {r.error ?? r.statusText ?? '-'}
-                                          </span>
-                                          <button
-                                            onClick={() => setViewResult(r)}
-                                            title="查看响应详情"
-                                            className="shrink-0 cursor-pointer rounded p-0.5 text-brand-light transition hover:bg-brand/10"
-                                          >
-                                            <Eye size={13} />
-                                          </button>
-                                        </div>
-                                      </td>
-                                    </tr>
-                                  );
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* ── 定时任务执行结果详情抽屉 ── */}
-      {viewResult && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm"
-          onClick={() => setViewResult(null)}
-        >
-          <div
-            className="glass flex max-h-[80vh] w-[560px] max-w-full flex-col overflow-hidden rounded-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-slate-700/40 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Eye size={15} className="text-brand-light" />
-                <span className="text-[13px] font-medium text-slate-100">执行结果详情</span>
+                )}
               </div>
-              <button
-                onClick={() => setViewResult(null)}
-                className="cursor-pointer rounded-md p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200"
-              >
-                <X size={16} />
-              </button>
             </div>
-
-            <div className="flex flex-wrap items-center gap-3 border-b border-slate-700/40 px-4 py-2 text-[12px]">
-              <span
-                className={`rounded-full px-2 py-0.5 text-[11px] ${resultStatusBadge(viewResult).cls}`}
-              >
-                {resultStatusBadge(viewResult).text}
-              </span>
-              <span className="text-slate-400">耗时 {viewResult.durationMs}ms</span>
-              <span className="text-slate-400">触发 {formatTime(viewResult.firedAt)}</span>
-              {viewResult.error && (
-                <span className="text-rose-400">错误：{viewResult.error}</span>
-              )}
-            </div>
-
-            <div className="min-h-0 flex-1 overflow-auto p-3">
-              {viewResult.body ? (
-                <BodyView body={viewResult.body} contentType={undefined} emptyHint="无响应体" />
-              ) : (
-                <div className="py-6 text-center text-[12px] text-slate-600">
-                  本次响应无返回内容
-                </div>
-              )}
-            </div>
-          </div>
+          );
+        })()}
         </div>
-      )}
     </div>
   );
 }

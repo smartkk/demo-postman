@@ -13,3 +13,10 @@ inst_status.txt
 
 # 内部数据（非源码）
 .codebuddy/
+
+# 本地调试/构建临时输出
+_build.txt
+_tsc.txt
+build_err.txt
+err_s.txt
+out_s.txt

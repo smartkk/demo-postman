@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
-import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, FolderPlus, Folder, ArrowUp, ArrowDown, GitBranch, Download, Search, Eye } from 'lucide-react';
+import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, ArrowUp, ArrowDown, Download, Search, Eye } from 'lucide-react';
 import { api } from '../api/client';
+import { Select } from './ui/Select';
 import { selectPreOnClick } from '../lib/select';
 import type {
   ChainProject,
@@ -11,6 +12,8 @@ import type {
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
 interface Props {
+  activeId: string | null;
+  onSelect: (id: string | null) => void;
   onClose: () => void;
 }
 
@@ -27,7 +30,7 @@ const emptyStep = (): ChainStep => ({
   extract: {},
 });
 
-export function ChainPanel({ onClose }: Props) {
+export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('');
   const [headers, setHeaders] = useState<Record<string, string>>({});
@@ -50,7 +53,7 @@ export function ChainPanel({ onClose }: Props) {
   // ── 持久化 ──
   const [projects, setProjects] = useState<ChainProject[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  const [loadedId, setLoadedId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('未命名链式任务');
   const [folder, setFolder] = useState('');
 
@@ -68,6 +71,24 @@ export function ChainPanel({ onClose }: Props) {
     });
     return off;
   }, [refreshList]);
+
+  // 根据左侧栏选中的任务加载编辑区
+  useEffect(() => {
+    let cancelled = false;
+    if (activeId) {
+      api.listChains().then((list) => {
+        if (cancelled) return;
+        const p = list.find((x) => x.id === activeId);
+        if (p) loadProject(p);
+      });
+    } else {
+      newProject();
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeId]);
 
   // 加载本地已记录的接口列表
   useEffect(() => {
@@ -154,12 +175,13 @@ export function ChainPanel({ onClose }: Props) {
     try {
       const saved = await api.saveChain({
         ...buildProject(),
-        id: activeId ?? '',
+        id: loadedId ?? '',
         createdAt: '',
         updatedAt: '',
       } as ChainProject);
-      setActiveId(saved.id);
+      setLoadedId(saved.id);
       setError('');
+      onSelect(saved.id);
       await refreshList();
     } catch (e) {
       setError(e instanceof Error ? e.message : '保存失败');
@@ -167,7 +189,7 @@ export function ChainPanel({ onClose }: Props) {
   };
 
   const loadProject = (p: ChainProject) => {
-    setActiveId(p.id);
+    setLoadedId(p.id);
     setProjectName(p.name);
     setFolder(p.folder || '');
     setSteps(p.steps?.length ? p.steps.map((s) => ({ ...emptyStep(), ...s })) : [emptyStep()]);
@@ -185,11 +207,11 @@ export function ChainPanel({ onClose }: Props) {
   };
 
   const run = async (useSaved: boolean) => {
-    if (useSaved && activeId) {
+    if (useSaved && loadedId) {
       setRunning(true);
       setError('');
       try {
-        const res = await api.runChain(activeId);
+        const res = await api.runChain(loadedId);
         setResults(res);
         await refreshList();
       } catch (e) {
@@ -203,6 +225,22 @@ export function ChainPanel({ onClose }: Props) {
       setError('请至少为一个步骤填写请求地址');
       return;
     }
+    // 步骤名称是变量引用键（{{步骤名.字段}}），重名会导致提取结果互相覆盖
+    const names = steps
+      .map((s) => (s.name.trim() || s.id))
+      .filter(Boolean);
+    const seen = new Set<string>();
+    const dups = new Set<string>();
+    for (const n of names) {
+      if (seen.has(n)) dups.add(n);
+      seen.add(n);
+    }
+    if (dups.size > 0) {
+      setError(
+        `步骤名称重复：${[...dups].join('、')}。后续步骤用 {{名称.字段}} 引用时会互相覆盖，请先重命名。`
+      );
+      return;
+    }
     setError('');
     setRunning(true);
     setResults(null);
@@ -210,11 +248,12 @@ export function ChainPanel({ onClose }: Props) {
       // 先保存再运行，确保 steps 已落盘（runChain 读取持久化数据）
       const saved = await api.saveChain({
         ...buildProject(),
-        id: activeId ?? '',
+        id: loadedId ?? '',
         createdAt: '',
         updatedAt: '',
       } as ChainProject);
-      setActiveId(saved.id);
+      setLoadedId(saved.id);
+      onSelect(saved.id);
       const res = await api.runChain(saved.id);
       setResults(res);
     } catch (e) {
@@ -225,7 +264,7 @@ export function ChainPanel({ onClose }: Props) {
   };
 
   const newProject = () => {
-    setActiveId(null);
+    setLoadedId(null);
     setProjectName('未命名链式任务');
     setFolder('');
     setSteps([emptyStep()]);
@@ -241,7 +280,10 @@ export function ChainPanel({ onClose }: Props) {
 
   const deleteProject = async (id: string) => {
     await api.deleteChain(id);
-    if (activeId === id) newProject();
+    if (loadedId === id) {
+      newProject();
+      onSelect(null);
+    }
     await refreshList();
   };
 
@@ -285,91 +327,9 @@ export function ChainPanel({ onClose }: Props) {
   const cur = steps[activeStep];
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="glass flex max-h-[90vh] w-[1100px] max-w-[96vw] overflow-hidden rounded-2xl border border-slate-700/50 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 左侧：已保存任务（按文件夹分组） */}
-        <div className="flex w-[260px] shrink-0 flex-col border-r border-slate-700/50 bg-slate-900/40">
-          <div className="flex items-center justify-between px-3 py-2.5">
-            <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-200">
-              <GitBranch size={14} className="text-brand-light" /> 链式任务
-            </span>
-            <button
-              onClick={newProject}
-              title="新建空白任务"
-              className="rounded-md bg-brand/20 px-1.5 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
-            >
-              <Plus size={13} />
-            </button>
-          </div>
-          <div className="px-3 pb-2">
-            <div className="flex gap-1">
-              <input
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="新文件夹名"
-                className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11px] outline-none focus:border-brand/60"
-              />
-              <button
-                onClick={addFolder}
-                title="新建文件夹"
-                className="rounded-md bg-slate-700/50 px-1.5 py-1 text-slate-300 transition hover:bg-slate-700 cursor-pointer"
-              >
-                <FolderPlus size={13} />
-              </button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {projects.length === 0 && (
-              <div className="px-2 py-6 text-center text-[11.5px] text-slate-500">
-                暂无保存的任务
-                <br /> 编辑后点「保存」即可持久化
-              </div>
-            )}
-            {folders.map((f) => {
-              const items = projects.filter((p) => p.folder === f);
-              return (
-                <div key={f} className="mb-1.5">
-                  <div className="flex items-center gap-1 px-1 py-1 text-[10.5px] uppercase tracking-wide text-slate-500">
-                    <Folder size={11} /> {f}
-                  </div>
-                  {items.length === 0 ? (
-                    <div className="px-2 py-1 text-[11px] text-slate-600">暂无任务</div>
-                  ) : (
-                    items.map((p) => (
-                      <ChainItem
-                        key={p.id}
-                        p={p}
-                        active={p.id === activeId}
-                        onOpen={() => loadProject(p)}
-                        onDelete={() => deleteProject(p.id)}
-                      />
-                    ))
-                  )}
-                </div>
-              );
-            })}
-            {projects
-              .filter((p) => !p.folder)
-              .map((p) => (
-                <ChainItem
-                  key={p.id}
-                  p={p}
-                  active={p.id === activeId}
-                  onOpen={() => loadProject(p)}
-                  onDelete={() => deleteProject(p.id)}
-                />
-              ))}
-          </div>
-        </div>
-
-        {/* 右侧：步骤编辑 + 运行 */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      {/* 编辑区 */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-4 flex items-center justify-between">
             <input
               value={projectName}
@@ -377,10 +337,11 @@ export function ChainPanel({ onClose }: Props) {
               className="w-[55%] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold text-slate-100 outline-none hover:border-slate-700/50 focus:border-brand/60"
             />
             <div className="flex items-center gap-2">
-              <select
+              <Select
                 value={folder}
                 onChange={(e) => setFolder(e.target.value)}
-                className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[12px] outline-none focus:border-brand/60"
+                wrapperClassName="relative shrink-0"
+                className="py-1.5 text-[12px]"
               >
                 <option value="">未分组</option>
                 {folders.map((f) => (
@@ -388,7 +349,7 @@ export function ChainPanel({ onClose }: Props) {
                     {f}
                   </option>
                 ))}
-              </select>
+              </Select>
               <button
                 onClick={doSave}
                 className="flex items-center gap-1 rounded-lg bg-brand/25 px-3 py-1.5 text-[12.5px] font-medium text-brand-light transition hover:bg-brand/35 cursor-pointer"
@@ -427,7 +388,7 @@ export function ChainPanel({ onClose }: Props) {
                 <Download size={12} /> 引入本地请求
               </button>
               <button
-                onClick={addStep}
+                onClick={() => addStep()}
                 className="flex items-center gap-1 rounded-md bg-brand/20 px-2 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
               >
                 <Plus size={12} /> 步骤
@@ -548,17 +509,17 @@ export function ChainPanel({ onClose }: Props) {
                   placeholder="步骤名（引用键，如 login）"
                   className="w-[200px] rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-2 text-[12px] outline-none focus:border-brand/60"
                 />
-                <select
+                <Select
                   value={method}
                   onChange={(e) => setMethod(e.target.value)}
-                  className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-2 text-[13px] outline-none focus:border-brand/60"
+                  wrapperClassName="relative shrink-0"
                 >
                   {METHODS.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
                   ))}
-                </select>
+                </Select>
                 <input
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
@@ -605,7 +566,7 @@ export function ChainPanel({ onClose }: Props) {
             >
               <Play size={14} /> {running ? '执行中…' : `运行（${steps.length} 步）`}
             </button>
-            {activeId && (
+            {loadedId && (
               <button
                 onClick={() => run(true)}
                 disabled={running}
@@ -757,45 +718,8 @@ export function ChainPanel({ onClose }: Props) {
               )}
             </div>
           )}
-        </div>
+          </div>
       </div>
-    </div>
-  );
-}
-
-function ChainItem({
-  p,
-  active,
-  onOpen,
-  onDelete,
-}: {
-  p: ChainProject;
-  active: boolean;
-  onOpen: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      className={`group flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] transition cursor-pointer ${
-        active ? 'bg-brand/20 text-brand-light' : 'text-slate-300 hover:bg-slate-700/40'
-      }`}
-      onClick={onOpen}
-    >
-      <span className="min-w-0 flex-1 truncate">{p.name || '未命名'}</span>
-      <span className="shrink-0 text-[10px] text-slate-500">
-        {p.steps?.length ?? 0} 步
-      </span>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        title="删除"
-        className="shrink-0 text-slate-500 opacity-0 transition hover:text-rose-400 group-hover:opacity-100 cursor-pointer"
-      >
-        <Trash2 size={12} />
-      </button>
-    </div>
   );
 }
 

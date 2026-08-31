@@ -10,6 +10,7 @@ import { ChainPanel } from './components/ChainPanel';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { api } from './api/client';
 import { useInterfaces } from './store/useInterfaces';
+import { ToastHost, installGlobalErrorToast } from './components/ui/Toast';
 import type {
   CaptureSettings,
   ExtensionStatus,
@@ -32,10 +33,17 @@ export default function App() {
     port: 8891,
   });
   const [manualOpen, setManualOpen] = useState(false);
-  const [schedulesOpen, setSchedulesOpen] = useState(false);
-  const [batchOpen, setBatchOpen] = useState(false);
-  const [chainOpen, setChainOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setView] = useState<'interfaces' | 'schedules' | 'chains' | 'batches'>('interfaces');
+  const [activeIds, setActiveIds] = useState<{
+    chains?: string | null;
+    batches?: string | null;
+    schedules?: string | null;
+  }>({});
+  const handleSelect = (v: typeof view, id: string | null) => {
+    setActiveIds((p) => ({ ...p, [v]: id }));
+    setView(v);
+  };
   const [settings, setSettings] = useState<CaptureSettings>({
     includeHosts: [],
     excludeHosts: [],
@@ -68,6 +76,7 @@ export default function App() {
   }, [sidebarWidth]);
 
   useEffect(() => {
+    installGlobalErrorToast();
     api.getProxyStatus().then(setProxyStatus);
     api.onProxyStatus(setProxyStatus);
     api.getExtensionStatus().then(setExtStatus);
@@ -139,14 +148,11 @@ export default function App() {
         onToggle={toggleProxy}
         onToggleExt={toggleExt}
         onManual={() => setManualOpen(true)}
-        onSchedules={() => setSchedulesOpen(true)}
-        onBatch={() => setBatchOpen(true)}
-        onChain={() => setChainOpen(true)}
         onSettings={() => setSettingsOpen(true)}
       />
       <div className="flex min-h-0 flex-1">
         <div style={{ width: sidebarWidth }} className="shrink-0">
-          <Sidebar store={store} />
+          <Sidebar store={store} view={view} onChangeView={setView} activeIds={activeIds} onSelect={handleSelect} />
         </div>
         <div
           className="relative w-1.5 shrink-0 cursor-col-resize bg-slate-700/30 transition-colors hover:bg-brand/60 active:bg-brand"
@@ -154,7 +160,23 @@ export default function App() {
         >
           <div className="absolute inset-y-0 -left-0.5 -right-0.5" />
         </div>
-        <DetailPanel record={store.selected} store={store} />
+        {view === 'interfaces' && <DetailPanel record={store.selected} store={store} />}
+        {view === 'schedules' && (
+          <SchedulePanel
+            records={store.list}
+            activeId={activeIds.schedules ?? null}
+          />
+        )}
+        {view === 'batches' && (
+          <BatchPanel selectedId={activeIds.batches ?? null} onClose={() => setView('interfaces')} />
+        )}
+        {view === 'chains' && (
+          <ChainPanel
+            activeId={activeIds.chains ?? null}
+            onSelect={(id) => handleSelect('chains', id)}
+            onClose={() => setView('interfaces')}
+          />
+        )}
       </div>
       {manualOpen && (
         <ManualEntry
@@ -165,14 +187,6 @@ export default function App() {
           }}
         />
       )}
-      {schedulesOpen && (
-        <SchedulePanel
-          records={store.list}
-          onClose={() => setSchedulesOpen(false)}
-        />
-      )}
-      {batchOpen && <BatchPanel onClose={() => setBatchOpen(false)} />}
-      {chainOpen && <ChainPanel onClose={() => setChainOpen(false)} />}
       {settingsOpen && (
         <SettingsPanel
           settings={settings}
@@ -180,6 +194,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
         />
       )}
+      <ToastHost />
       </div>
     </ErrorBoundary>
   );

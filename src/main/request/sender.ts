@@ -8,6 +8,9 @@ const MAX_BODY = 8 * 1024 * 1024; // 8MB
 /**
  * 在 Electron 主进程侧发送 HTTP/HTTPS 请求（绕过浏览器 CORS/代理限制），
  * 返回状态码、响应头、响应体与耗时。支持 30x 重定向（最多 5 次）。
+ *
+ * 注意：不设置请求超时（既不设 socket timeout，也不主动 destroy），
+ * 请求会一直等待服务端响应，直到服务端返回、底层连接出错，或调用方通过 signal 取消。
  */
 export function sendRequest(
   input: CaptureInput,
@@ -45,7 +48,6 @@ export function sendRequest(
       port: url.port || (url.protocol === 'https:' ? 443 : 80),
       path: url.pathname + url.search,
       headers,
-      timeout: 30000,
       // 允许自签名/内网证书（开发调试场景）
       rejectUnauthorized: false,
     };
@@ -73,6 +75,8 @@ export function sendRequest(
       ) {
         const nextUrl = new URL(respHeaders['location'], url);
         const nextMethod = status === 303 ? 'GET' : method;
+        // 当前请求的生命周期已结束，移除 abort 监听，避免泄漏
+        signal?.removeEventListener('abort', onAbort);
         res.resume(); // 丢弃当前响应体
         sendRequest(
           {
@@ -81,7 +85,8 @@ export function sendRequest(
             method: nextMethod,
             body: status === 303 ? null : body,
           },
-          redirects + 1
+          redirects + 1,
+          signal // 透传取消信号，保证重定向链中也能取消
         )
           .then(resolve)
           .catch(reject);
@@ -113,10 +118,6 @@ export function sendRequest(
       });
     });
 
-    req.on('timeout', () => {
-      signal?.removeEventListener('abort', onAbort);
-      req.destroy(new Error('请求超时（30s）'));
-    });
     req.on('error', (err) => {
       signal?.removeEventListener('abort', onAbort);
       reject(err);

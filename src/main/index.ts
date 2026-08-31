@@ -49,6 +49,19 @@ let batchStore: BatchStore;
 let chainStore: ChainStore;
 let userDataDir: string;
 
+// ── 单实例锁 ──
+// 防止应用被多次启动导致存在多个 ScheduleManager 实例：每个实例都会从
+// schedules.json 恢复已启用任务并各自排定计时器，最终表现为定时任务「重复执行两次」。
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1200,

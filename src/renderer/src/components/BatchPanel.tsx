@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { X, Play, Plus, Trash2, Layers, Copy, FileJson, Upload, Save, FolderOpen, FolderPlus, Folder } from 'lucide-react';
+import { X, Play, Plus, Trash2, Copy, FileJson, Upload, Save, FolderOpen } from 'lucide-react';
 import { api } from '../api/client';
+import { Select } from './ui/Select';
 import type {
   BatchCallInput,
   BatchCallResult,
@@ -12,10 +13,11 @@ import { relTime } from './method';
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
 interface Props {
+  selectedId: string | null;
   onClose: () => void;
 }
 
-export function BatchPanel({ onClose }: Props) {
+export function BatchPanel({ selectedId, onClose }: Props) {
   const [method, setMethod] = useState('GET');
   const [url, setUrl] = useState('https://api.example.com/users/{{id}}');
   const [headers, setHeaders] = useState<Record<string, string>>({});
@@ -48,6 +50,24 @@ export function BatchPanel({ onClose }: Props) {
     });
     return off;
   }, [refreshList]);
+
+  // 根据左侧栏选中的项目加载编辑区
+  useEffect(() => {
+    let cancelled = false;
+    if (selectedId) {
+      api.listBatches().then((list) => {
+        if (cancelled) return;
+        const p = list.find((x) => x.id === selectedId);
+        if (p) loadProject(p);
+      });
+    } else {
+      newProject();
+    }
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   /* ── 变量名编辑 ── */
   const setVariableAt = (idx: number, val: string) => {
@@ -305,88 +325,9 @@ export function BatchPanel({ onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="glass flex max-h-[90vh] w-[1000px] max-w-[96vw] overflow-hidden rounded-2xl border border-slate-700/50 shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 左侧：已保存项目（按文件夹分组） */}
-        <div className="flex w-[260px] shrink-0 flex-col border-r border-slate-700/50 bg-slate-900/40">
-          <div className="flex items-center justify-between px-3 py-2.5">
-            <span className="flex items-center gap-1.5 text-[12.5px] font-semibold text-slate-200">
-              <Layers size={14} className="text-brand-light" /> 批量任务
-            </span>
-            <button
-              onClick={newProject}
-              title="新建空白任务"
-              className="rounded-md bg-brand/20 px-1.5 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
-            >
-              <Plus size={13} />
-            </button>
-          </div>
-          <div className="px-3 pb-2">
-            <div className="flex gap-1">
-              <input
-                value={newFolderName}
-                onChange={(e) => setNewFolderName(e.target.value)}
-                placeholder="新文件夹名"
-                className="min-w-0 flex-1 rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11px] outline-none focus:border-brand/60"
-              />
-              <button
-                onClick={addFolder}
-                title="新建文件夹"
-                className="rounded-md bg-slate-700/50 px-1.5 py-1 text-slate-300 transition hover:bg-slate-700 cursor-pointer"
-              >
-                <FolderPlus size={13} />
-              </button>
-            </div>
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-            {projects.length === 0 && (
-              <div className="px-2 py-6 text-center text-[11.5px] text-slate-500">
-                暂无保存的任务
-                <br /> 编辑后点「保存」即可持久化
-              </div>
-            )}
-            {folders.map((f) => {
-              const items = projects.filter((p) => p.folder === f);
-              if (items.length === 0) return null;
-              return (
-                <div key={f} className="mb-1.5">
-                  <div className="flex items-center gap-1 px-1 py-1 text-[10.5px] uppercase tracking-wide text-slate-500">
-                    <Folder size={11} /> {f}
-                  </div>
-                  {items.map((p) => (
-                    <ProjectItem
-                      key={p.id}
-                      p={p}
-                      active={p.id === activeId}
-                      onOpen={() => loadProject(p)}
-                      onDelete={() => deleteProject(p.id)}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-            {projects
-              .filter((p) => !p.folder)
-              .map((p) => (
-                <ProjectItem
-                  key={p.id}
-                  p={p}
-                  active={p.id === activeId}
-                  onOpen={() => loadProject(p)}
-                  onDelete={() => deleteProject(p.id)}
-                />
-              ))}
-          </div>
-        </div>
-
-        {/* 右侧：编辑 + 运行 */}
-        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+    <div className="flex h-full min-w-0 flex-1 flex-col">
+      {/* 编辑区 */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-4 flex items-center justify-between">
             <input
               value={projectName}
@@ -394,10 +335,10 @@ export function BatchPanel({ onClose }: Props) {
               className="w-[60%] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-[15px] font-semibold text-slate-100 outline-none hover:border-slate-700/50 focus:border-brand/60"
             />
             <div className="flex items-center gap-2">
-              <select
+              <Select
                 value={folder}
                 onChange={(e) => setFolder(e.target.value)}
-                className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[12px] outline-none focus:border-brand/60"
+                wrapperClassName="relative shrink-0"
               >
                 <option value="">未分组</option>
                 {folders.map((f) => (
@@ -405,7 +346,7 @@ export function BatchPanel({ onClose }: Props) {
                     {f}
                   </option>
                 ))}
-              </select>
+              </Select>
               <button
                 onClick={doSave}
                 className="flex items-center gap-1 rounded-lg bg-brand/25 px-3 py-1.5 text-[12.5px] font-medium text-brand-light transition hover:bg-brand/35 cursor-pointer"
@@ -433,17 +374,17 @@ export function BatchPanel({ onClose }: Props) {
           {/* 基础请求 */}
           <div className="space-y-3 rounded-xl bg-slate-800/30 p-3">
             <div className="flex gap-2">
-              <select
+              <Select
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
-                className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2.5 py-2 text-[13px] outline-none focus:border-brand/60"
+                wrapperClassName="relative shrink-0"
               >
                 {METHODS.map((m) => (
                   <option key={m} value={m}>
                     {m}
                   </option>
                 ))}
-              </select>
+              </Select>
               <input
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
@@ -689,45 +630,8 @@ export function BatchPanel({ onClose }: Props) {
               </div>
             </div>
           )}
-        </div>
+          </div>
       </div>
-    </div>
-  );
-}
-
-function ProjectItem({
-  p,
-  active,
-  onOpen,
-  onDelete,
-}: {
-  p: BatchProject;
-  active: boolean;
-  onOpen: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      className={`group flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] transition cursor-pointer ${
-        active ? 'bg-brand/20 text-brand-light' : 'text-slate-300 hover:bg-slate-700/40'
-      }`}
-      onClick={onOpen}
-    >
-      <span className="min-w-0 flex-1 truncate">{p.name || '未命名'}</span>
-      <span className="shrink-0 text-[10px] text-slate-500">
-        {p.rows?.length ?? 0} 行
-      </span>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        title="删除"
-        className="shrink-0 text-slate-500 opacity-0 transition hover:text-rose-400 group-hover:opacity-100 cursor-pointer"
-      >
-        <Trash2 size={12} />
-      </button>
-    </div>
   );
 }
 

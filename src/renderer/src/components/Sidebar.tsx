@@ -14,6 +14,10 @@ import {
   ListFilter,
   ArrowUpDown,
   SlidersHorizontal,
+  Clock,
+  GitBranch,
+  Layers,
+  Inbox,
 } from 'lucide-react';
 import type { InterfaceRecord } from '../../../shared/types';
 import type {
@@ -21,12 +25,30 @@ import type {
   StatusFilter,
 } from '../store/useInterfaces';
 import { methodColor, relTime } from './method';
+import { Select } from './ui/Select';
 import { ConfirmDialog } from './ConfirmDialog';
 import { BatchDeleteDialog } from './BatchDeleteDialog';
+import { showToast } from './ui/Toast';
+import { ChainList } from './ChainList';
+import { BatchList } from './BatchList';
+import { ScheduleList } from './ScheduleList';
+
+type ViewKey = 'interfaces' | 'schedules' | 'chains' | 'batches';
 
 interface Props {
   store: ReturnType<typeof import('../store/useInterfaces').useInterfaces>;
+  view: ViewKey;
+  onChangeView: (v: ViewKey) => void;
+  activeIds: { chains?: string | null; batches?: string | null; schedules?: string | null };
+  onSelect: (view: ViewKey, id: string | null) => void;
 }
+
+const NAV_ITEMS: { key: ViewKey; label: string; icon: typeof Inbox }[] = [
+  { key: 'interfaces', label: '接口', icon: Inbox },
+  { key: 'schedules', label: '定时', icon: Clock },
+  { key: 'chains', label: '链式', icon: GitBranch },
+  { key: 'batches', label: '批量', icon: Layers },
+];
 
 const METHODS = ['ALL', 'GET', 'POST', 'PUT', 'DELETE', 'PATCH'];
 const SORTS: { key: SortKey; label: string }[] = [
@@ -49,7 +71,7 @@ function statusDot(status: number | undefined): string {
   return 'bg-rose-400';
 }
 
-export function Sidebar({ store }: Props) {
+export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Props) {
   const {
     filtered,
     selectedId,
@@ -115,7 +137,8 @@ export function Sidebar({ store }: Props) {
   };
 
   const doBatch = (onlyCaptured: boolean) => {
-    deleteBySource(onlyCaptured ? 'captured' : 'manual');
+    // 仅删抓取：只清 captured；删除全部：先清 captured 再清 manual
+    deleteBySource('captured');
     if (!onlyCaptured) deleteBySource('manual');
     setBatchOpen(false);
   };
@@ -140,8 +163,9 @@ export function Sidebar({ store }: Props) {
       try {
         const data = JSON.parse(String(reader.result));
         await importCollection(data);
+        showToast('集合导入成功', 'success');
       } catch (e) {
-        alert('导入失败：文件不是合法的集合 JSON');
+        showToast('导入失败：文件不是合法的集合 JSON', 'error');
       }
     };
     reader.readAsText(file);
@@ -240,8 +264,33 @@ export function Sidebar({ store }: Props) {
 
   return (
     <aside className="glass flex h-full w-full flex-col">
-      {/* ── 搜索栏 ── */}
-      <div className="px-3 pt-3 pb-2">
+      {/* ── 视图导航 ── */}
+      <div className="flex shrink-0 gap-1 border-b border-slate-700/40 px-2.5 py-2">
+        {NAV_ITEMS.map((it) => {
+          const Icon = it.icon;
+          const active = view === it.key;
+          return (
+            <button
+              key={it.key}
+              onClick={() => onChangeView(it.key)}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-1.5 py-1.5 text-[12px] font-medium transition cursor-pointer ${
+                active
+                  ? 'bg-brand/20 text-brand-light'
+                  : 'text-slate-400 hover:bg-slate-700/40 hover:text-slate-200'
+              }`}
+              title={it.label}
+            >
+              <Icon size={14} className="shrink-0" />
+              <span>{it.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── 仅接口视图展示搜索 / 列表 ── */}
+      {view === 'interfaces' && (
+        <>
+        <div className="px-3 pt-3 pb-2">
         <div className="relative">
           <Search
             size={15}
@@ -257,7 +306,6 @@ export function Sidebar({ store }: Props) {
         </div>
       </div>
 
-      {/* ── 工具栏：统计 + 操作按钮 ── */}
       <div className="flex items-center gap-1.5 px-3 pb-2">
         <span className="min-w-0 flex-1 truncate text-[11.5px] text-slate-500">
           共 <span className="text-slate-300 font-medium">{filtered.length}</span> 个接口
@@ -332,7 +380,6 @@ export function Sidebar({ store }: Props) {
         />
       </div>
 
-      {/* ── 可折叠筛选区 ── */}
       {showFilters && (
         <div className="space-y-2 border-b border-slate-700/40 px-3 pb-3">
           {/* 方法筛选 */}
@@ -353,59 +400,61 @@ export function Sidebar({ store }: Props) {
           </div>
           {/* 排序 + 状态 */}
           <div className="flex items-center gap-2">
-            <div className="flex flex-1 items-center gap-1.5 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1">
+            <div className="flex items-center gap-1.5">
               <ArrowUpDown size={11} className="text-slate-500 shrink-0" />
-              <select
+              <Select
                 value={sort}
                 onChange={(e) => setSort(e.target.value as SortKey)}
-                className="w-full bg-transparent text-[11px] text-slate-300 outline-none cursor-pointer"
+                wrapperClassName="relative shrink-0 flex-1"
               >
                 {SORTS.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
-            <div className="flex flex-1 items-center gap-1.5 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1">
+            <div className="flex items-center gap-1.5">
               <ListFilter size={11} className="text-slate-500 shrink-0" />
-              <select
+              <Select
                 value={statusFilter}
                 onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-                className="w-full bg-transparent text-[11px] text-slate-300 outline-none cursor-pointer"
+                wrapperClassName="relative shrink-0 flex-1"
               >
                 {STATUS_FILTERS.map((s) => (
                   <option key={s.key} value={s.key}>
                     {s.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         </div>
       )}
 
-      {/* ── 批量操作提示栏 ── */}
       {managing && selectedIds.size > 0 && (
         <div className="mx-3 mb-1 flex items-center gap-2 rounded-md border border-brand/40 bg-brand/10 px-2 py-1.5 text-[11.5px] text-slate-200">
           <span className="flex-1">已选 {selectedIds.size} 项</span>
           <div className="flex items-center gap-1">
             <ArrowRight size={12} className="text-slate-400" />
-            <select
+            <Select
               value=""
               onChange={(e) => {
-                if (e.target.value) moveSelectedToFolder(e.target.value);
+                // '' = 未选择（占位）；__ungrouped__ = 移到「未分组」
+                const v = e.target.value;
+                if (v === '__ungrouped__') moveSelectedToFolder('');
+                else if (v) moveSelectedToFolder(v);
               }}
-              className="rounded border border-slate-700/50 bg-slate-800/60 px-1 py-0.5 text-[11px] outline-none cursor-pointer"
+              wrapperClassName="relative shrink-0"
             >
               <option value="">移至分组…</option>
-              <option value="">未分组</option>
+              <option value="__ungrouped__">未分组</option>
               {folders.map((f) => (
                 <option key={f} value={f}>
                   {f}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
           <button
             onClick={clearSelect}
@@ -485,6 +534,27 @@ export function Sidebar({ store }: Props) {
           })
         )}
       </div>
+      </>
+      )}
+
+      {view === 'chains' && (
+        <ChainList
+          activeId={activeIds.chains ?? null}
+          onSelect={(id) => onSelect('chains', id)}
+        />
+      )}
+      {view === 'batches' && (
+        <BatchList
+          activeId={activeIds.batches ?? null}
+          onSelect={(id) => onSelect('batches', id)}
+        />
+      )}
+      {view === 'schedules' && (
+        <ScheduleList
+          activeId={activeIds.schedules ?? null}
+          onSelect={(id) => onSelect('schedules', id)}
+        />
+      )}
 
       <ConfirmDialog
         open={!!confirm}

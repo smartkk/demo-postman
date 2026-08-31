@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Clipboard, Network, Sun, Moon, Clock, Layers, GitBranch } from 'lucide-react';
+import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Network, Sun, Moon, Clipboard } from 'lucide-react';
 import type { ExtensionStatus, ProxyStatus } from '../../../shared/types';
 import { api } from '../api/client';
 
@@ -9,9 +9,6 @@ interface Props {
   onToggle: () => void;
   onToggleExt: () => void;
   onManual: () => void;
-  onSchedules: () => void;
-  onBatch: () => void;
-  onChain: () => void;
   onSettings: () => void;
 }
 
@@ -21,9 +18,6 @@ export function ProxyBar({
   onToggle,
   onToggleExt,
   onManual,
-  onSchedules,
-  onBatch,
-  onChain,
   onSettings,
 }: Props) {
   const [caOpen, setCaOpen] = useState(false);
@@ -124,33 +118,6 @@ export function ProxyBar({
           className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
         >
           {light ? <Moon size={15} className="shrink-0" /> : <Sun size={15} className="shrink-0" />}
-        </button>
-
-        <button
-          onClick={onSchedules}
-          title="定时调度：以固定间隔自动调用接口"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
-        >
-          <Clock size={15} className="shrink-0" />
-          <span className="hidden lg:inline">定时</span>
-        </button>
-
-        <button
-          onClick={onBatch}
-          title="批量调用：同一接口用不同参数批量请求"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
-        >
-          <Layers size={15} className="shrink-0" />
-          <span className="hidden lg:inline">批量</span>
-        </button>
-
-        <button
-          onClick={onChain}
-          title="链式请求：多接口按顺序串联，上一步响应作为参数传给下一步"
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[13px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
-        >
-          <GitBranch size={15} className="shrink-0" />
-          <span className="hidden lg:inline">链式</span>
         </button>
 
         <button

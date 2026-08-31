@@ -12,6 +12,7 @@ import type {
   RecordSource,
   ResponseRecord,
   ScheduleConfig,
+  ScheduleRunResult,
 } from '../../../shared/types';
 
 export const api = {
@@ -105,6 +106,8 @@ export const api = {
     window.api.toggleSchedule(id),
   getScheduleHistory: (id: string): Promise<ScheduleConfig['history']> =>
     window.api.getScheduleHistory(id),
+  runSchedule: (id: string): Promise<ScheduleRunResult | null> =>
+    window.api.runSchedule(id),
   onSchedules: (cb: (list: ScheduleConfig[]) => void) =>
     window.api.onSchedules(cb),
   onBatches: (
@@ -159,17 +162,18 @@ declare global {
       chooseDataDir: () => Promise<string | null>;
       setDataDir: (dir: string) => Promise<boolean>;
       relaunch: () => Promise<void>;
-      onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void) => void;
-      onProxyStatus: (cb: (s: ProxyStatus) => void) => void;
-      onExtensionStatus: (cb: (s: ExtensionStatus) => void) => void;
-      onSettings: (cb: (s: CaptureSettings) => void) => void;
+      onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void) => () => void;
+      onProxyStatus: (cb: (s: ProxyStatus) => void) => () => void;
+      onExtensionStatus: (cb: (s: ExtensionStatus) => void) => () => void;
+      onSettings: (cb: (s: CaptureSettings) => void) => () => void;
       /* ── 定时调度 ── */
       listSchedules: () => Promise<ScheduleConfig[]>;
       saveSchedule: (config: ScheduleConfig) => Promise<ScheduleConfig[]>;
       deleteSchedule: (id: string) => Promise<boolean>;
       toggleSchedule: (id: string) => Promise<ScheduleConfig | undefined>;
       getScheduleHistory: (id: string) => Promise<ScheduleConfig['history']>;
-      onSchedules: (cb: (list: ScheduleConfig[]) => void) => void;
+      runSchedule: (id: string) => Promise<ScheduleRunResult | null>;
+      onSchedules: (cb: (list: ScheduleConfig[]) => void) => () => void;
       onBatches: (cb: (list: BatchProject[], folders: string[]) => void) => () => void;
       /* ── 链式请求 ── */
       listChains: () => Promise<ChainProject[]>;

@@ -1,6 +1,5 @@
 import { ipcMain, BrowserWindow, shell } from 'electron';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import type { InterfaceStore } from '../storage/interfaceStore';
 import type { BatchStore } from '../storage/batchStore';
 import type { ChainStore } from '../storage/chainStore';
@@ -23,147 +22,13 @@ import type {
   RecordSource,
   ResponseRecord,
   ScheduleConfig,
+  ScheduleRunResult,
 } from '../../shared/types';
 import { sendRequest } from '../request/sender';
+import { resolveDynamic, resolveEnv, runBatchCall } from '../request/batchRunner';
 
 /** 在途请求的中断控制器（按接口 id 索引），用于「取消发送」。 */
 const inFlight = new Map<string, AbortController>();
-
-/**
- * 内置动态变量：在模板或参数行单元格值中以 {{$name}} 形式书写，运行时自动解析。
- * 支持：
- *   $timestamp      当前 Unix 秒级时间戳
- *   $timestamp_ms   毫秒级时间戳
- *   $datetime       ISO 本地时间 2026-08-05T14:30:00+08:00
- *   $date           2026-08:05（YYYY-MM-DD）
- *   $time           HH:mm:ss
- *   $uuid           随机 UUID（每次调用生成不同值）
- *   $random(a,b)    a~b 之间的随机整数（含端点）
- * 未匹配的动态变量保持原样返回。
- */
-function resolveDynamic(s: string): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const dateStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-  const offMin = -now.getTimezoneOffset();
-  const off = `${offMin >= 0 ? '+' : '-'}${pad(Math.floor(Math.abs(offMin) / 60))}:${pad(Math.abs(offMin) % 60)}`;
-  return s.replace(/\{\{\s*\$([\w.-]+)(?:\(([^)]*)\))?\s*\}\}/g, (_m, name: string, args?: string) => {
-    switch (name) {
-      case 'timestamp':
-        return String(Math.floor(now.getTime() / 1000));
-      case 'timestamp_ms':
-        return String(now.getTime());
-      case 'datetime':
-        return `${dateStr}T${timeStr}${off}`;
-      case 'date':
-        return dateStr;
-      case 'time':
-        return timeStr;
-      case 'uuid':
-        return crypto.randomUUID();
-      case 'random': {
-        if (args != null) {
-          const parts = args.split(',').map((x) => parseInt(x.trim(), 10));
-          if (parts.length === 2 && !parts.some(Number.isNaN)) {
-            const [a, b] = parts;
-            const lo = Math.min(a, b);
-            const hi = Math.max(a, b);
-            return String(lo + Math.floor(Math.random() * (hi - lo + 1)));
-          }
-        }
-        return _m;
-      }
-      default:
-        return _m;
-    }
-  });
-}
-
-/** 用键值对替换 {{var}} 占位符（URL / Header 值 / Body）。未提供的变量尝试解析为动态变量，否则保持原样。 */
-function resolvePlaceholders(input: CaptureInput, vars: Record<string, string>): CaptureInput {
-  const sub = (s: string) =>
-    s.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_, k: string) =>
-      k in vars ? vars[k] : resolveDynamic(`{{${k}}}`)
-    );
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(input.headers || {})) headers[k] = sub(v);
-  return {
-    ...input,
-    url: sub(input.url),
-    headers,
-    body: input.body ? sub(input.body) : input.body,
-  };
-}
-
-/** 用环境变量替换 {{var}} 占位符（URL / Header 值 / Body）。 */
-function resolveEnv(
-  input: CaptureInput,
-  env?: Record<string, string>
-): CaptureInput {
-  if (!env) return input;
-  return resolvePlaceholders(input, env);
-}
-
-/** 批量调用：同一基础请求，按每行变量值替换后逐个/并发发送，返回每行的发送时间 + 结果。 */
-async function runBatchCall(
-  input: BatchCallInput,
-  settings: Settings
-): Promise<BatchCallResult[]> {
-  const env = settings.get().environments?.[settings.get().activeEnv || ''];
-  // 先对环境变量做一次性替换（基础模板可引用环境），再对每行做行变量替换
-  const base: CaptureInput = {
-    method: input.method,
-    url: input.url,
-    headers: input.headers,
-    body: input.body,
-    contentType: input.headers['content-type'] || null,
-  };
-  const baseResolved = env ? resolveEnv(base, env) : base;
-
-  const runOne = async (row: Record<string, string>, index: number): Promise<BatchCallResult> => {
-    const sentAt = new Date().toISOString();
-    // 先解析参数行单元格值里的动态变量（如 {{$uuid}}、{{$timestamp}}），每行独立生成
-    const resolvedRow: Record<string, string> = {};
-    for (const [k, v] of Object.entries(row)) resolvedRow[k] = resolveDynamic(v);
-    const request = resolvePlaceholders(baseResolved, resolvedRow);
-    try {
-      const resp = await sendRequest(request, 0);
-      return {
-        index,
-        vars: resolvedRow,
-        status: resp.status,
-        statusText: resp.statusText,
-        durationMs: resp.durationMs,
-        body: resp.body,
-        request,
-        sentAt,
-        at: resp.at,
-      };
-    } catch (err) {
-      return {
-        index,
-        vars: resolvedRow,
-        status: 0,
-        statusText: '',
-        durationMs: 0,
-        error: err instanceof Error ? err.message : String(err),
-        body: '',
-        request,
-        sentAt,
-        at: new Date().toISOString(),
-      };
-    }
-  };
-
-  const rows = input.rows || [];
-  if (input.sequential) {
-    const out: BatchCallResult[] = [];
-    for (let i = 0; i < rows.length; i++) out.push(await runOne(rows[i], i));
-    return out;
-  }
-  return Promise.all(rows.map((row, i) => runOne(row, i)));
-}
 
 /**
  * 链式请求运行：按步骤顺序逐个发送 HTTP 请求，
@@ -208,8 +73,9 @@ export async function runChain(
       for (const [k, v] of Object.entries(extracted)) vars[`${stepName}.${k}`] = v;
     }
     const sub = (s: string): string =>
-      s.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_m, k: string) =>
-        k in vars ? vars[k] : resolveDynamic(`{{${k}}}`)
+      s.replace(/\{\{\s*(\$?[\w.-]+)(?:\(([^)]*)\))?\s*\}\}/g, (m, k: string) =>
+        // 变量池命中优先；否则把完整匹配交给动态变量解析（支持 {{$timestamp}}、{{$random(1,5)}}）
+        k in vars ? vars[k] : resolveDynamic(m)
       );
     const headers: Record<string, string> = {};
     for (const [k, v] of Object.entries(step.headers || {})) headers[k] = sub(v);
@@ -369,7 +235,10 @@ export function registerIpc(
   ipcMain.handle(
     'request:batchSend',
     (_e, input: BatchCallInput): Promise<BatchCallResult[]> =>
-      runBatchCall(input, settings)
+      runBatchCall(
+        input,
+        settings.get().environments?.[settings.get().activeEnv || '']
+      )
   );
 
   // ── 批量调用任务（可持久化保存，按文件夹分组） ──
@@ -405,7 +274,7 @@ export function registerIpc(
             rows: p.rows,
             sequential: p.sequential,
           },
-          settings
+          settings.get().environments?.[settings.get().activeEnv || '']
         );
         batchStore!.recordRun(id, results, new Date().toISOString());
         return results;
@@ -534,6 +403,11 @@ export function registerIpc(
       'schedule:history',
       (_e, id: string): ScheduleConfig['history'] =>
         scheduleManager.getHistory(id)
+    );
+    ipcMain.handle(
+      'schedule:runNow',
+      async (_e, id: string): Promise<ScheduleRunResult | null> =>
+        scheduleManager.runNow(id)
     );
     scheduleManager.onPush((list) => {
       getWin()?.webContents.send('schedule:updated', list);

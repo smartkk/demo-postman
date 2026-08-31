@@ -9,6 +9,11 @@ import { InterfaceStore } from '../src/main/storage/interfaceStore';
 import { CaptureProxy } from '../src/main/proxy/captureProxy';
 import { ExtensionReceiver } from '../src/main/extension/extensionReceiver';
 import { sendRequest } from '../src/main/request/sender';
+import {
+  runBatchCall,
+  resolveEnvVars,
+  resolvePlaceholders,
+} from '../src/main/request/batchRunner';
 import { parseCurl } from '../src/shared/curl';
 import {
   matchHost,
@@ -492,6 +497,23 @@ test('InterfaceStore 按完整 URL 去重', () => {
   fs.rmSync(f, { force: true });
 });
 
+test('运行时切换去重模式应重建索引，不产生重复记录', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  // 默认 method+host+path 去重
+  s.upsert({ method: 'GET', url: 'https://api.test/p?q=1', headers: {}, contentType: null });
+  // 切换到完整 URL：已有记录索引需同步重建
+  s.setDedupMode(true);
+  s.upsert({ method: 'GET', url: 'https://api.test/p?q=1', headers: {}, contentType: null });
+  s.upsert({ method: 'GET', url: 'https://api.test/p?q=2', headers: {}, contentType: null });
+  assert.strictEqual(s.list().length, 2, '切到完整 URL 后 q=1 应合并、q=2 新建');
+  // 切回 method+path：q=3 应合并进既有记录
+  s.setDedupMode(false);
+  s.upsert({ method: 'GET', url: 'https://api.test/p?q=3', headers: {}, contentType: null });
+  assert.strictEqual(s.list().length, 2, '切回 method+path 后 q=3 应合并，而非新建');
+  fs.rmSync(f, { force: true });
+});
+
 test('InterfaceStore 导出/导入集合', () => {
   const f = tmpFile();
   const s = new InterfaceStore(f);
@@ -630,6 +652,110 @@ async function testSendRequest() {
   target.close();
 }
 
+async function testBatchRunner() {
+  // ── 并发上限 + 结果保序 ──
+  let active = 0;
+  let maxActive = 0;
+  const server = http.createServer((_req, res) => {
+    active++;
+    maxActive = Math.max(maxActive, active);
+    setTimeout(() => {
+      active--;
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ok":true}');
+    }, 25);
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  const port = (server.address() as { port: number }).port;
+
+  const rows = Array.from({ length: 60 }, (_, i) => ({ id: String(i) }));
+  const out = await runBatchCall({
+    method: 'GET',
+    url: `http://127.0.0.1:${port}/x?id={{id}}`,
+    headers: {},
+    body: null,
+    variables: ['id'],
+    rows,
+    sequential: false,
+  });
+  assert.strictEqual(out.length, 60, '结果条数应为 60');
+  out.forEach((r, i) => assert.strictEqual(r.index, i, '并发结果应按行序返回'));
+  assert.ok(out.every((r) => r.status === 200), '全部行应成功');
+  assert.ok(
+    maxActive <= 20,
+    `并发上限应 ≤20，实际峰值 ${maxActive}`
+  );
+
+  // ── 串行保序 ──
+  const seq = await runBatchCall({
+    method: 'GET',
+    url: `http://127.0.0.1:${port}/x?id={{id}}`,
+    headers: {},
+    body: null,
+    variables: ['id'],
+    rows: rows.slice(0, 5),
+    sequential: true,
+  });
+  assert.strictEqual(seq.length, 5, '串行结果条数应为 5');
+  assert.strictEqual(seq[4].index, 4, '串行应按下标顺序返回');
+
+  // ── E2E：模板中的 {{$uuid}} 每行独立生成 ──
+  const echos: string[] = [];
+  const echoServer = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      echos.push(Buffer.concat(chunks).toString('utf8'));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+  });
+  await new Promise<void>((r) => echoServer.listen(0, '127.0.0.1', r));
+  const echoPort = (echoServer.address() as { port: number }).port;
+  await runBatchCall({
+    method: 'POST',
+    url: `http://127.0.0.1:${echoPort}/u`,
+    headers: { 'content-type': 'application/json' },
+    body: '{"seq":"{{id}}","uuid":"{{$uuid}}"}',
+    variables: ['id'],
+    rows: [{ id: '1' }, { id: '2' }, { id: '3' }],
+    sequential: true,
+  });
+  const uuids = echos.map((b) => JSON.parse(b).uuid);
+  assert.strictEqual(new Set(uuids).size, 3, '每行 $uuid 应互不相同');
+  echoServer.closeAllConnections?.();
+  await new Promise<void>((r) => echoServer.close(() => r()));
+
+  server.closeAllConnections?.();
+  await new Promise<void>((r) => server.close(() => r()));
+}
+
+test('批量占位符解析：环境变量 + 行变量 + 动态变量', () => {
+  // 模拟 runBatchCall 的解析管线：环境变量预解析，动态变量在每行独立生成
+  const base = resolveEnvVars(
+    {
+      method: 'POST',
+      url: '{{baseUrl}}/users/{{id}}?t={{$timestamp}}',
+      headers: { 'X-Tenant': '{{tenant}}' },
+      body: '{"id":"{{id}}","u":"{{$uuid}}"}',
+      contentType: null,
+    },
+    { baseUrl: 'http://localhost:9999' }
+  );
+  const r1 = resolvePlaceholders(base, { id: '7', tenant: 't1' });
+  assert.ok(
+    r1.url.startsWith('http://localhost:9999/users/7'),
+    '环境变量与行变量应替换进 URL'
+  );
+  assert.match(r1.url, /\?t=\d+$/, '动态变量 $timestamp 应解析');
+  assert.strictEqual(r1.headers?.['X-Tenant'], 't1', '行变量应替换进 Header');
+  const r2 = resolvePlaceholders(base, { id: '8', tenant: 't2' });
+  assert.ok(r2.url.includes('/users/8'), '每行变量应独立替换');
+  const u1 = r1.body!.match(/"u":"([^"]+)"/)![1];
+  const u2 = r2.body!.match(/"u":"([^"]+)"/)![1];
+  assert.notStrictEqual(u1, u2, '每行 $uuid 应生成不同值');
+});
+
 async function main() {
   await testProxyCapture()
     .then(() => {
@@ -656,6 +782,15 @@ async function main() {
     })
     .catch((e) => {
       console.error('  \u2717 插件接收端点测试失败:', e?.message || e);
+    });
+
+  await testBatchRunner()
+    .then(() => {
+      console.log('  \u2713 批量调用并发受限、结果保序、占位符解析正确');
+      passed++;
+    })
+    .catch((e) => {
+      console.error('  \u2717 批量调用测试失败:', e?.message || e);
     });
 
   console.log(`\n全部断言通过：核心 ${passed} 项 ✅\n`);

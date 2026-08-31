@@ -4,6 +4,7 @@ import type { CaptureInput, InterfaceRecord, ResponseRecord } from '../../../sha
 import { relTime } from './method';
 import { api } from '../api/client';
 import { KeyValueEditor } from './KeyValueEditor';
+import { Select } from './ui/Select';
 import { KVTable } from './KVTable';
 import { BodyView } from './BodyView';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -247,17 +248,17 @@ export function DetailPanel({ record, store }: Props) {
       <div className="border-b border-slate-700/40 px-5 py-4">
         <div className="space-y-2">
           <div className="flex items-center gap-2.5">
-            <select
+            <Select
               value={editMethod}
               onChange={(e) => setEditMethod(e.target.value)}
-              className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[13px] outline-none focus:border-brand/60"
+              wrapperClassName="relative shrink-0"
             >
               {METHODS.map((m) => (
                 <option key={m} value={m}>
                   {m}
                 </option>
               ))}
-            </select>
+            </Select>
             <input
               value={editUrl}
               onChange={(e) => handleEditUrl(e.target.value)}
@@ -352,10 +353,10 @@ export function DetailPanel({ record, store }: Props) {
           </div>
           <div className="mt-2 flex items-center gap-1.5">
             <Folder size={13} className="text-slate-500" />
-            <select
+            <Select
               value={record.folder || ''}
               onChange={(e) => store.moveFolder(record.id, e.target.value)}
-              className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11.5px] text-slate-300 outline-none focus:border-brand/60 cursor-pointer"
+              wrapperClassName="relative shrink-0"
             >
               <option value="">未分组</option>
               {store.folders.map((f) => (
@@ -363,7 +364,7 @@ export function DetailPanel({ record, store }: Props) {
                   {f}
                 </option>
               ))}
-            </select>
+            </Select>
             <span
               className={`rounded px-1.5 py-0.5 text-[10px] ${
                 record.source === 'manual'
@@ -411,7 +412,7 @@ export function DetailPanel({ record, store }: Props) {
               </Section>
               <Section title="鉴权（自动写入 Authorization 头）">
                 <div className="space-y-2">
-                  <select
+                  <Select
                     value={authType}
                     onChange={(e) => {
                       const t = e.target.value as typeof authType;
@@ -422,12 +423,11 @@ export function DetailPanel({ record, store }: Props) {
                         setEditHeaders(h);
                       }
                     }}
-                    className="w-full rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1.5 text-[12.5px] outline-none focus:border-brand/60 cursor-pointer"
                   >
                     <option value="none">无</option>
                     <option value="bearer">Bearer Token</option>
                     <option value="basic">Basic Auth</option>
-                  </select>
+                  </Select>
                   {authType === 'bearer' && (
                     <input
                       value={authToken}
@@ -518,10 +518,10 @@ export function DetailPanel({ record, store }: Props) {
               {history.length > 1 && (
                 <div className="mb-3 flex items-center gap-2 text-[11.5px] text-slate-500">
                   <span>历史响应</span>
-                  <select
+                  <Select
                     value={activeIdx}
                     onChange={(e) => setHistoryIdx(Number(e.target.value))}
-                    className="rounded-md border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[11.5px] text-slate-300 outline-none focus:border-brand/60 cursor-pointer"
+                    wrapperClassName="relative shrink-0"
                   >
                     {history
                       .map((r, i) => ({ r, i }))
@@ -532,7 +532,7 @@ export function DetailPanel({ record, store }: Props) {
                           {relTime(r.at)}
                         </option>
                       ))}
-                  </select>
+                  </Select>
                 </div>
               )}
               <ResponseView response={displayResponse} error={sendError} />
