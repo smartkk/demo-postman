@@ -22,6 +22,7 @@ import {
 } from '../src/main/captureFilter';
 import type { ResponseRecord } from '../src/shared/types';
 import { JsonTree } from '../src/renderer/src/components/JsonTree';
+import { buildFolderBuckets } from '../src/renderer/src/utils/groupByFolder';
 
 function tmpFile(): string {
   return path.join(os.tmpdir(), `demo-postman-test-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
@@ -532,6 +533,89 @@ test('InterfaceStore 导出/导入集合', () => {
   fs.rmSync(f2, { force: true });
 });
 
+console.log('\n=== 索引与去重一致性专项（P1-3 / P1-4 / P1-5 / P1-9）===');
+
+test('P1-3 按文件夹单次遍历分桶，并统计抓取来源数', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  s.upsert({ method: 'GET', url: 'https://a.com/1', headers: {}, contentType: null });
+  s.upsert({ method: 'GET', url: 'https://a.com/2', headers: {}, contentType: null }, { folder: '组A' });
+  s.addManual({ method: 'POST', url: 'https://a.com/3', headers: {}, contentType: null });
+  const { buckets, capturedCount } = buildFolderBuckets(s.list());
+  assert.strictEqual(capturedCount, 2, '应统计到 2 条抓取记录');
+  assert.strictEqual(buckets.get('')!.length, 2, '未分组应有 2 条（1 抓取 + 1 手动）');
+  assert.strictEqual(buckets.get('组A')!.length, 1, '组A 应有 1 条');
+  const total = [...buckets.values()].reduce((n, arr) => n + arr.length, 0);
+  assert.strictEqual(total, s.list().length, '所有记录都应被分桶且不重复');
+  fs.rmSync(f, { force: true });
+});
+
+test('P1-4 响应回传经次级索引定位，多记录不串号', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  const a = s.upsert({ method: 'GET', url: 'https://api.x/a', headers: {}, contentType: null });
+  const b = s.upsert({ method: 'GET', url: 'https://api.x/b', headers: {}, contentType: null });
+  s.upsertResponse('GET', 'https://api.x/a', {
+    status: 200, statusText: 'OK', headers: {}, body: 'A', durationMs: 1, at: new Date().toISOString(),
+  });
+  assert.strictEqual(s.get(a!.id)!.lastResponse!.body, 'A', '响应应命中 /a 记录');
+  assert.strictEqual(s.get(b!.id)!.lastResponse, null, '/b 不应被串号写入');
+  fs.rmSync(f, { force: true });
+});
+
+test('P1-4 手动记录也能经次级索引关联响应（captureIndex 未命中路径）', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  const r = s.addManual({ method: 'GET', url: 'https://api.x/m', headers: {}, contentType: null });
+  s.upsertResponse('GET', 'https://api.x/m', {
+    status: 200, statusText: 'OK', headers: {}, body: 'M', durationMs: 1, at: new Date().toISOString(),
+  });
+  assert.strictEqual(s.get(r!.id)!.lastResponse!.body, 'M', '手动记录响应应通过 pathIndex 关联');
+  fs.rmSync(f, { force: true });
+});
+
+test('P1-5 删除记录后索引同步清理，响应不再串到已删记录', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  const a = s.upsert({ method: 'GET', url: 'https://api.x/del', headers: {}, contentType: null });
+  s.upsert({ method: 'GET', url: 'https://api.x/keep', headers: {}, contentType: null });
+  const before = s.list().length;
+  s.deleteOne(a!.id);
+  s.upsertResponse('GET', 'https://api.x/del', {
+    status: 200, statusText: 'OK', headers: {}, body: 'X', durationMs: 1, at: new Date().toISOString(),
+  });
+  assert.strictEqual(s.get(a!.id), null, '已删记录不应残留');
+  assert.strictEqual(s.list().length, before, '删除后再回传应为已删接口新建一条，总数回到删除前');
+  assert.strictEqual(
+    s.list().find((x) => x.url.includes('/del'))!.callCount,
+    1,
+    '新建记录 callCount 应为 1（未被误合并到已删记录）'
+  );
+  fs.rmSync(f, { force: true });
+});
+
+test('P1-9 导入集合在 dedupByFullUrl 下索引一致，后续抓取按完整 URL 去重不重复', () => {
+  const f = tmpFile();
+  const s = new InterfaceStore(f);
+  s.setDedupMode(true);
+  s.upsert({ method: 'GET', url: 'https://api.x/p?q=1', headers: {}, contentType: null });
+  s.upsert({ method: 'GET', url: 'https://api.x/p?q=2', headers: {}, contentType: null });
+  assert.strictEqual(s.list().length, 2, '应先有 2 条（不同 query）');
+  const snapshot = s.exportCollection(); // 真实落盘结构，走 ingest → rebuildIndexes
+  s.importCollection(snapshot);
+  assert.strictEqual(s.list().length, 2, '导入后仍为 2 条');
+  s.upsert({ method: 'GET', url: 'https://api.x/p?q=1', headers: {}, contentType: null });
+  assert.strictEqual(s.list().length, 2, '完整 URL 去重下 q=1 应合并');
+  assert.strictEqual(
+    s.list().find((x) => x.query.q === '1')!.callCount,
+    2,
+    'q=1 调用次数应累加（合并成功，未重复）'
+  );
+  s.upsert({ method: 'GET', url: 'https://api.x/p?q=3', headers: {}, contentType: null });
+  assert.strictEqual(s.list().length, 3, 'q=3 应新建为第 3 条');
+  fs.rmSync(f, { force: true });
+});
+
 console.log('\n=== 代理捕获测试（HTTP） ===');
 
 async function testProxyCapture() {
@@ -756,6 +840,82 @@ test('批量占位符解析：环境变量 + 行变量 + 动态变量', () => {
   assert.notStrictEqual(u1, u2, '每行 $uuid 应生成不同值');
 });
 
+async function testProxyBodyLimit() {
+  // P1-10：请求体超过 2MB 上限时，代理应丢弃内容但保留请求元信息（防止单个大上传撑爆主进程内存）
+  const target = http.createServer((req, res) => {
+    req.on('data', () => {});
+    req.on('end', () => res.end('ok'));
+  });
+  await new Promise<void>((r) => target.listen(0, '127.0.0.1', r));
+  const targetPort = (target.address() as { port: number }).port;
+
+  const f = tmpFile();
+  const store = new InterfaceStore(f);
+  const caDir = path.join(os.tmpdir(), `demo-postman-ca-${Date.now()}`);
+  const proxy = new CaptureProxy(19077, caDir, (i) => store.upsert(i));
+  proxy.start();
+  await new Promise((r) => setTimeout(r, 300));
+
+  // 3MB 请求体（> 2MB 上限）
+  const big = 'x'.repeat(3 * 1024 * 1024);
+  await new Promise<void>((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: 19077,
+        method: 'POST',
+        path: `http://127.0.0.1:${targetPort}/big`,
+        headers: { 'content-type': 'text/plain', 'content-length': Buffer.byteLength(big) },
+      },
+      (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve());
+      }
+    );
+    req.on('error', reject);
+    req.write(big);
+    req.end();
+  });
+  await new Promise((r) => setTimeout(r, 400));
+
+  const list = store.list();
+  assert.strictEqual(list.length, 1, '代理应捕获 1 条（含大请求体）');
+  const rec = list[0];
+  assert.strictEqual(rec.method, 'POST');
+  assert.ok(rec.url.includes('/big'), 'url 应包含 path');
+  // P1-10 核心断言：超限请求体被丢弃，但 method/url/headers 元信息保留
+  assert.strictEqual(rec.body, null, `超过 2MB 的请求体应被丢弃为 null（实际 ${rec.body ? rec.body.length : 0} 字节）`);
+
+  // 反向验证：小请求体应原样保留
+  const small = 'hello';
+  await new Promise<void>((resolve, reject) => {
+    const req = http.request(
+      {
+        host: '127.0.0.1',
+        port: 19077,
+        method: 'POST',
+        path: `http://127.0.0.1:${targetPort}/small`,
+        headers: { 'content-type': 'text/plain' },
+      },
+      (res) => {
+        res.on('data', () => {});
+        res.on('end', () => resolve());
+      }
+    );
+    req.on('error', reject);
+    req.write(small);
+    req.end();
+  });
+  await new Promise((r) => setTimeout(r, 300));
+  const smallRec = store.list().find((x) => x.url.includes('/small'));
+  assert.strictEqual(smallRec!.body, 'hello', '小请求体应原样保留');
+
+  proxy.stop();
+  target.close();
+  fs.rmSync(caDir, { recursive: true, force: true });
+  fs.rmSync(f, { force: true });
+}
+
 async function main() {
   await testProxyCapture()
     .then(() => {
@@ -791,6 +951,15 @@ async function main() {
     })
     .catch((e) => {
       console.error('  \u2717 批量调用测试失败:', e?.message || e);
+    });
+
+  await testProxyBodyLimit()
+    .then(() => {
+      console.log('  \u2713 代理请求体超过 2MB 被丢弃、元信息保留，小请求体原样保留');
+      passed++;
+    })
+    .catch((e) => {
+      console.error('  \u2717 代理请求体上限测试失败:', e?.message || e);
     });
 
   console.log(`\n全部断言通过：核心 ${passed} 项 ✅\n`);

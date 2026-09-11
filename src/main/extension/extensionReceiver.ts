@@ -3,6 +3,23 @@ import type { CaptureInput, ResponseRecord } from '../../shared/types';
 
 const MAX_BODY = 5 * 1024 * 1024; // 5MB 上限，防止异常大请求撑爆内存
 
+/** 本机来源：仅 127.0.0.1 / localhost（可带端口）。 */
+const LOCAL_HOST_RE = /^(127\.0\.0\.1|localhost)(:\d+)?$/;
+
+/**
+ * 判断写入来源是否可信。
+ *
+ * - Host 必须是本机：挡住 DNS rebinding（把域名解析到 127.0.0.1 后带任意 Host 访问）。
+ * - Origin 必须是扩展上下文或本机页面：挡住任意网页伪造抓取记录。
+ * - 缺失 Origin 视为非浏览器客户端（扩展的 background fetch 早期版本、命令行调试），放行。
+ */
+function trustedOrigin(origin: string | undefined, host: string | undefined): boolean {
+  if (host && !LOCAL_HOST_RE.test(host.toLowerCase())) return false;
+  if (!origin) return true;
+  if (origin.startsWith('chrome-extension://')) return true;
+  return /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(origin);
+}
+
 /**
  * 浏览器插件接收端点：在本地固定端口暴露一个 HTTP 服务，
  * 接收 Chrome 扩展（DevTools/Network 协议）捕获后 POST 过来的数据：
@@ -38,8 +55,24 @@ export class ExtensionReceiver {
     if (this.server) return;
 
     const server = http.createServer((req, res) => {
-      // 允许跨域（扩展 background fetch 会受 CORS 限制）
-      res.setHeader('Access-Control-Allow-Origin', '*');
+      const origin = req.headers.origin;
+      const host = req.headers.host;
+      if (!trustedOrigin(origin, host)) {
+        console.warn(
+          '[extension] 已拒绝非可信来源的写入',
+          `origin=${origin || '(无)'} host=${host || '(无)'}`
+        );
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'forbidden origin' }));
+        return;
+      }
+
+      // 只回显可信来源，不再无差别放行 "*"：
+      // 否则本地浏览的任意网页都能向 8891 端口 POST 伪造的接口记录。
+      if (origin) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+      }
       res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 

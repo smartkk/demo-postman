@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useFolderCrud } from '../hooks/useFolderCrud';
 import { Plus, FolderPlus, Folder, Trash2, Layers } from 'lucide-react';
 import { api } from '../api/client';
 import type { BatchProject } from '../../../shared/types';
@@ -11,8 +12,10 @@ interface Props {
 
 export function BatchList({ activeId, onSelect }: Props) {
   const [projects, setProjects] = useState<BatchProject[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
-  const [newFolderName, setNewFolderName] = useState('');
+  const { folders, setFolders, newFolderName, setNewFolderName, addFolder } = useFolderCrud({
+    listFolders: api.listBatchFolders,
+    createFolder: api.createBatchFolder,
+  });
 
   const refresh = async () => {
     const [list, f] = await Promise.all([api.listBatches(), api.listBatchFolders()]);
@@ -29,14 +32,6 @@ export function BatchList({ activeId, onSelect }: Props) {
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const addFolder = async () => {
-    const name = newFolderName.trim();
-    if (!name) return;
-    setNewFolderName('');
-    await api.createBatchFolder(name);
-    await refresh();
-  };
 
   const deleteProject = async (id: string) => {
     await api.deleteBatch(id);

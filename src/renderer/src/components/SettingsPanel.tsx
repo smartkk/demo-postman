@@ -198,6 +198,18 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
             />
           </label>
 
+          <label className="flex items-start justify-between gap-3 rounded-xl bg-slate-800/40 p-3">
+            <span className="min-w-0">
+              <span className="flex items-center gap-1.5 text-[13px] font-medium text-slate-200">
+                <Layers size={13} className="text-brand-light" /> 严格校验 TLS 证书
+              </span>
+              <span className="mt-1 block text-[11px] leading-relaxed text-slate-500">
+                关闭时接受自签名 / 内网证书（默认，适合调试）；开启后会对 HTTPS 目标做证书校验，自签名证书会被拒绝。
+              </span>
+            </span>
+            <Toggle on={!!settings.verifyTls} onClick={() => onChange({ verifyTls: !settings.verifyTls })} />
+          </label>
+
           <div>
             <label className="mb-1.5 block text-[12px] font-medium text-slate-300">
               仅捕获这些主机

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { FolderManager } from './folderManager';
 import type {
   CaptureInput,
   InterfaceRecord,
@@ -14,6 +15,8 @@ interface PersistShape {
   folders: string[];
 }
 
+/** 变更通知的节流间隔（毫秒），避免抓取高频时逐条全量推送到渲染进程。 */
+const EMIT_DEBOUNCE_MS = 200;
 /** 保留的历史响应条数上限（最新在末尾）。 */
 const MAX_RESPONSES = 20;
 /** 落盘时单条响应体超过该大小则截断（避免 interfaces.json 膨胀）。 */
@@ -54,11 +57,31 @@ function maskSensitiveHeaders(
 export class InterfaceStore {
   private records = new Map<string, InterfaceRecord>();
   private captureIndex = new Map<string, string>(); // method|host|path -> id（仅抓取记录）
-  private folders: string[] = [];
+  /**
+   * method|host|path -> 记录 id 集合（覆盖全部记录，不限来源）。
+   *
+   * 响应回传是高频路径：captureIndex 只覆盖「抓取」记录、且键可能带 query，
+   * 未命中时此前会退化成 O(n) 全表扫描。这个次级索引让未命中也能 O(1) 定位。
+   *
+   * 用集合而非单值：手动创建/复制的记录允许 method+host+path 重复，
+   * 取集合中最早插入的 id，以对齐原先全表扫描的命中顺序。
+   */
+  private pathIndex = new Map<string, Set<string>>();
   private filePath: string;
   private saveTimer: NodeJS.Timeout | null = null;
+  private emitTimer: NodeJS.Timeout | null = null;
   private listeners: Array<() => void> = [];
   private dedupByFullUrl = false;
+  /** list() 的排序结果缓存，数据一变即失效（在 scheduleSave 中统一清空）。 */
+  private listCache: InterfaceRecord[] | null = null;
+  /** 分组管理（从三份 store 抽出来的共享逻辑，见 folderManager.ts）。 */
+  private folders = new FolderManager(
+    () => this.records.values(),
+    () => {
+      this.scheduleSave();
+      this.emitChange();
+    }
+  );
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -68,14 +91,7 @@ export class InterfaceStore {
   /** 设置去重策略：true=按完整 URL（含 query）去重。切换后重建索引，避免旧键失效产生重复记录。 */
   setDedupMode(fullUrl: boolean): void {
     this.dedupByFullUrl = fullUrl;
-    this.captureIndex.clear();
-    for (const r of this.records.values()) {
-      if (r.source === 'captured') {
-        const sp = new URLSearchParams(r.query || {}).toString();
-        const search = sp ? `?${sp}` : '';
-        this.captureIndex.set(this.buildKey(r.method, r.host, r.path, search), r.id);
-      }
-    }
+    this.rebuildIndexes();
   }
 
   private buildKey(method: string, host: string, p: string, search = ''): string {
@@ -83,57 +99,90 @@ export class InterfaceStore {
     return this.dedupByFullUrl && search ? `${base}|${search}` : base;
   }
 
+  /** 由 query 还原 URL 的 search 部分（含前置 ?，无参数时为空串）。 */
+  private searchOf(query?: Record<string, string>): string {
+    const sp = new URLSearchParams(query || {}).toString();
+    return sp ? `?${sp}` : '';
+  }
+
+  /** 次级索引的键：method|host|path（不含 query，与响应回传的匹配条件一致）。 */
+  private pathKeyOf(method: string, host: string, p: string): string {
+    return `${method.toUpperCase()}|${host.toLowerCase()}|${p}`;
+  }
+
+  /** 把一条记录挂到次级索引上。 */
+  private indexRecord(r: InterfaceRecord): void {
+    const k = this.pathKeyOf(r.method, r.host, r.path);
+    const set = this.pathIndex.get(k);
+    if (set) set.add(r.id);
+    else this.pathIndex.set(k, new Set([r.id]));
+  }
+
+  /**
+   * 重建全部索引（captureIndex + pathIndex）。
+   *
+   * load / importCollection / setDedupMode / update / delete 等处必须共用这里，否则会出现
+   * 「建索引时漏传 search、查询时带 search」的键不一致——在 dedupByFullUrl
+   * 模式下表现为导入后同一接口被重复新建记录。
+   */
+  private rebuildIndexes(): void {
+    this.captureIndex.clear();
+    this.pathIndex.clear();
+    for (const r of this.records.values()) {
+      this.indexRecord(r);
+      if (r.source === 'captured') {
+        this.captureIndex.set(
+          this.buildKey(r.method, r.host, r.path, this.searchOf(r.query)),
+          r.id
+        );
+      }
+    }
+  }
+
   private genId(): string {
     return crypto.randomUUID().replace(/-/g, '').slice(0, 12);
+  }
+
+  /**
+   * 把一批记录装载进内存（仅填充数据结构，不触发保存与通知），并重建全部索引。
+   * load 的主/备份两条路径与 importCollection 共用，避免索引构建逻辑分叉。
+   */
+  private ingest(recs: InterfaceRecord[], folders?: string[]): void {
+    for (const r of recs) {
+      if (!r.source) r.source = 'captured';
+      this.records.set(r.id, r);
+    }
+    this.rebuildIndexes();
+    if (folders) this.folders.setAll(folders);
   }
 
   private load(): void {
     try {
       if (!fs.existsSync(this.filePath)) return;
       const raw = fs.readFileSync(this.filePath, 'utf8');
-      const parsed: PersistShape | InterfaceRecord[] = JSON.parse(raw);
-      const recs: InterfaceRecord[] = Array.isArray(parsed)
-        ? parsed
-        : parsed.records || [];
-      for (const r of recs) {
-        if (!r.source) r.source = 'captured';
-        this.records.set(r.id, r);
-        if (r.source === 'captured') {
-          this.captureIndex.set(this.buildKey(r.method, r.host, r.path), r.id);
-        }
-      }
-      if (!Array.isArray(parsed) && parsed.folders) {
-        this.folders = parsed.folders;
-      }
+      const loaded = this.parsePersisted(raw);
+      if (loaded) this.ingest(loaded.records, loaded.folders);
     } catch (err) {
       console.error('[store] 加载失败，尝试备份', err);
       const bak = this.filePath + '.bak';
       if (fs.existsSync(bak)) {
         try {
-          const parsed: PersistShape | InterfaceRecord[] = JSON.parse(
-            fs.readFileSync(bak, 'utf8')
-          );
-          const recs: InterfaceRecord[] = Array.isArray(parsed)
-            ? parsed
-            : parsed.records || [];
-          for (const r of recs) {
-            if (!r.source) r.source = 'captured';
-            this.records.set(r.id, r);
-            if (r.source === 'captured') {
-              this.captureIndex.set(
-                this.buildKey(r.method, r.host, r.path),
-                r.id
-              );
-            }
-          }
-          if (!Array.isArray(parsed) && parsed.folders) {
-            this.folders = parsed.folders;
-          }
+          const loaded = this.parsePersisted(fs.readFileSync(bak, 'utf8'));
+          if (loaded) this.ingest(loaded.records, loaded.folders);
         } catch (e2) {
           console.error('[store] 备份加载失败', e2);
         }
       }
     }
+  }
+
+  /** 解析落盘内容，兼容数组与 { records, folders } 两种格式。 */
+  private parsePersisted(
+    raw: string
+  ): { records: InterfaceRecord[]; folders?: string[] } | null {
+    const parsed = JSON.parse(raw) as PersistShape | InterfaceRecord[];
+    if (Array.isArray(parsed)) return { records: parsed };
+    return { records: parsed.records || [], folders: parsed.folders };
   }
 
   /** 浏览器抓取 / 代理捕获时调用：已存在抓取记录则覆盖最新参数并累加次数，否则新建。 */
@@ -197,6 +246,7 @@ export class InterfaceStore {
         folder: opts?.folder ?? '', // 新建抓取记录时才套用自动分组
       };
       this.records.set(id, record);
+      this.indexRecord(record);
       this.captureIndex.set(key, id);
     }
     this.scheduleSave();
@@ -240,15 +290,20 @@ export class InterfaceStore {
       source: 'manual',
     };
     this.records.set(id, record);
+    this.indexRecord(record);
     this.scheduleSave();
     this.emitChange();
     return record;
   }
 
+  /** 按最后更新时间倒序返回全部记录；结果缓存到下次数据变更。 */
   list(): InterfaceRecord[] {
-    return [...this.records.values()].sort((a, b) =>
-      b.lastUpdated.localeCompare(a.lastUpdated)
-    );
+    if (!this.listCache) {
+      this.listCache = [...this.records.values()].sort((a, b) =>
+        b.lastUpdated.localeCompare(a.lastUpdated)
+      );
+    }
+    return this.listCache;
   }
 
   /** 编辑已存在的接口：按 id 定位，保留 id/createdAt/callCount/name/folder/source，更新其余字段。 */
@@ -263,11 +318,6 @@ export class InterfaceStore {
 
     const existing = this.records.get(id);
     if (!existing) return null;
-
-    // 清理旧 captureIndex 中指向该 id 的条目
-    for (const [k, v] of this.captureIndex) {
-      if (v === id) this.captureIndex.delete(k);
-    }
 
     const method = (input.method || 'GET').toUpperCase();
     const host = parsed.host;
@@ -293,9 +343,8 @@ export class InterfaceStore {
       lastUpdated: now,
     };
     this.records.set(id, record);
-    if (record.source === 'captured') {
-      this.captureIndex.set(this.buildKey(method, host, p, search), id);
-    }
+    // 去重键随 method/host/path/query 变化，统一重建避免残留旧键
+    this.rebuildIndexes();
     this.scheduleSave();
     this.emitChange();
     return record;
@@ -324,6 +373,7 @@ export class InterfaceStore {
       query: { ...src.query },
     };
     this.records.set(nid, copy);
+    this.indexRecord(copy);
     this.scheduleSave();
     this.emitChange();
     return copy;
@@ -333,9 +383,8 @@ export class InterfaceStore {
   deleteOne(id: string): boolean {
     if (!this.records.has(id)) return false;
     this.records.delete(id);
-    for (const [k, v] of this.captureIndex) {
-      if (v === id) this.captureIndex.delete(k);
-    }
+    // 整体重建索引，比逐个反查再删除更简洁且不易漏
+    this.rebuildIndexes();
     this.scheduleSave();
     this.emitChange();
     return true;
@@ -347,12 +396,11 @@ export class InterfaceStore {
     for (const [id, r] of [...this.records.entries()]) {
       if (r.source === source) {
         this.records.delete(id);
-        for (const [k, v] of this.captureIndex) {
-          if (v === id) this.captureIndex.delete(k);
-        }
         count++;
       }
     }
+    // 一次重建即可，避免「每删一条都全扫一遍索引」的 O(n²)
+    if (count) this.rebuildIndexes();
     this.scheduleSave();
     this.emitChange();
     return count;
@@ -387,39 +435,31 @@ export class InterfaceStore {
     this.emitChange();
   }
 
-  // ===== 分组（集合）管理 =====
+  // ===== 分组（集合）管理（委托给 FolderManager，逻辑见 folderManager.ts）=====
   listFolders(): string[] {
-    return [...this.folders];
+    return this.folders.list();
   }
 
   createFolder(name: string): void {
-    const n = name.trim();
-    if (!n || this.folders.includes(n)) return;
-    this.folders.push(n);
-    this.scheduleSave();
-    this.emitChange();
+    this.folders.create(name);
   }
 
   deleteFolder(name: string): void {
-    this.folders = this.folders.filter((f) => f !== name);
-    for (const r of this.records.values()) {
-      if (r.folder === name) r.folder = '';
-    }
-    this.scheduleSave();
-    this.emitChange();
+    this.folders.delete(name);
   }
 
   clearAll(): void {
     this.records.clear();
     this.captureIndex.clear();
-    this.folders = [];
+    this.pathIndex.clear();
+    this.folders.setAll([]);
     this.scheduleSave();
     this.emitChange();
   }
 
   /** 导出整个集合（记录 + 分组），供迁移/分享。 */
   exportCollection(): PersistShape {
-    return { version: 1, records: this.list(), folders: [...this.folders] };
+    return { version: 1, records: this.list(), folders: this.folders.list() };
   }
 
   /** 导入集合：清空现有数据后载入（records 兼容数组与 {records,folders} 两种格式）。 */
@@ -430,14 +470,7 @@ export class InterfaceStore {
     const folders: string[] = Array.isArray(data) ? [] : data.folders || [];
     this.records.clear();
     this.captureIndex.clear();
-    for (const r of recs) {
-      if (!r.source) r.source = 'captured';
-      this.records.set(r.id, r);
-      if (r.source === 'captured') {
-        this.captureIndex.set(this.buildKey(r.method, r.host, r.path), r.id);
-      }
-    }
-    this.folders = [...folders];
+    this.ingest(recs, folders);
     this.scheduleSave();
     this.emitChange();
   }
@@ -494,14 +527,16 @@ export class InterfaceStore {
     let id = this.captureIndex.get(key);
     let record = id ? this.records.get(id) || null : null;
     if (!record) {
-      for (const r of this.records.values()) {
-        if (
-          r.method.toUpperCase() === m &&
-          r.host.toLowerCase() === host.toLowerCase() &&
-          r.path === p
-        ) {
-          record = r;
-          break;
+      // captureIndex 未命中（如记录是手动创建的、或去重键带了 query）时，
+      // 走次级索引而不是 O(n) 全表扫描。响应回传是高频路径，涨到数千条后差别明显。
+      const ids = this.pathIndex.get(this.pathKeyOf(m, host, p));
+      if (ids) {
+        for (const rid of ids) {
+          const r = this.records.get(rid);
+          if (r) {
+            record = r;
+            break;
+          }
         }
       }
     }
@@ -548,6 +583,7 @@ export class InterfaceStore {
       folder: opts?.folder ?? '',
     };
     this.records.set(nid, rec);
+    this.indexRecord(rec);
     this.captureIndex.set(key, nid);
     this.scheduleSave();
     this.emitChange();
@@ -558,11 +594,26 @@ export class InterfaceStore {
     this.listeners.push(cb);
   }
 
+  /**
+   * 通知订阅者数据已变更（节流）。
+   *
+   * 抓取是高频路径：每来一条请求就会变更一次，而订阅者（IPC 推送）会把
+   * 整个列表序列化后跨进程传给渲染进程——实测 166 条 / 13MB 的数据单次
+   * 序列化就要 80ms+。若不节流，抓包时每秒几十条请求会直接把界面拖死。
+   *
+   * 节流后界面最多延迟 200ms 看到最新数据，观感无损而开销降一个数量级。
+   */
   private emitChange(): void {
-    for (const cb of this.listeners) cb();
+    if (this.emitTimer) return;
+    this.emitTimer = setTimeout(() => {
+      this.emitTimer = null;
+      for (const cb of this.listeners) cb();
+    }, EMIT_DEBOUNCE_MS);
   }
 
   private scheduleSave(): void {
+    // 数据已变，list() 的排序缓存失效
+    this.listCache = null;
     if (this.saveTimer) clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.save(), 300);
   }
@@ -576,7 +627,7 @@ export class InterfaceStore {
     const dir = path.dirname(this.filePath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const data = JSON.stringify(
-      { version: 1, records: this.list(), folders: this.folders },
+      { version: 1, records: this.list(), folders: this.folders.list() },
       null,
       2
     );

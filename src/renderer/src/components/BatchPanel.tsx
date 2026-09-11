@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { useFolderCrud } from '../hooks/useFolderCrud';
 import { X, Play, Plus, Trash2, Copy, FileJson, Upload, Save, FolderOpen } from 'lucide-react';
 import { api } from '../api/client';
 import { Select } from './ui/Select';
@@ -31,7 +32,10 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
   // ── 持久化：已保存的批量项目 & 文件夹 ──
   const [projects, setProjects] = useState<BatchProject[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
+  const { folders, setFolders } = useFolderCrud({
+    listFolders: api.listBatchFolders,
+    createFolder: api.createBatchFolder,
+  });
   const [activeId, setActiveId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('未命名批量任务');
   const [folder, setFolder] = useState('');
@@ -302,16 +306,6 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const deleteProject = async (id: string) => {
     await api.deleteBatch(id);
     if (activeId === id) newProject();
-    await refreshList();
-  };
-
-  const [newFolderName, setNewFolderName] = useState('');
-  const addFolder = async () => {
-    const n = newFolderName.trim();
-    if (!n) return;
-    await api.createBatchFolder(n);
-    setFolder(n);
-    setNewFolderName('');
     await refreshList();
   };
 

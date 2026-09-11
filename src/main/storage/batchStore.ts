@@ -1,6 +1,7 @@
 import fs from 'node:fs';
-import path from 'node:path';
 import crypto from 'node:crypto';
+import { FolderManager } from './folderManager';
+import { atomicWriteJson } from './atomicWrite';
 import type { BatchProject } from '../../shared/types';
 
 interface PersistShape {
@@ -16,7 +17,13 @@ interface PersistShape {
  */
 export class BatchStore {
   private projects = new Map<string, BatchProject>();
-  private folders: string[] = [];
+  private folders = new FolderManager(
+    () => this.projects.values(),
+    () => {
+      this.scheduleSave();
+      this.emitChange();
+    }
+  );
   private filePath: string;
   private listeners: Array<() => void> = [];
 
@@ -43,7 +50,7 @@ export class BatchStore {
         this.projects.set(p.id, p);
       }
       if (!Array.isArray(parsed) && parsed.folders) {
-        this.folders = parsed.folders;
+        this.folders.setAll(parsed.folders);
       }
     } catch (err) {
       console.error('[batchStore] 加载失败', err);
@@ -126,26 +133,17 @@ export class BatchStore {
     this.emitChange();
   }
 
-  // ===== 文件夹（分组）管理 =====
+  // ===== 文件夹（分组）管理（委托给 FolderManager，逻辑见 folderManager.ts）=====
   listFolders(): string[] {
-    return [...this.folders];
+    return this.folders.list();
   }
 
   createFolder(name: string): void {
-    const n = name.trim();
-    if (!n || this.folders.includes(n)) return;
-    this.folders.push(n);
-    this.scheduleSave();
-    this.emitChange();
+    this.folders.create(name);
   }
 
   deleteFolder(name: string): void {
-    this.folders = this.folders.filter((f) => f !== name);
-    for (const p of this.projects.values()) {
-      if (p.folder === name) p.folder = '';
-    }
-    this.scheduleSave();
-    this.emitChange();
+    this.folders.delete(name);
   }
 
   onChange(cb: () => void): void {
@@ -161,18 +159,10 @@ export class BatchStore {
   }
 
   persist(): void {
-    const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const data = JSON.stringify(
-      { version: 1, projects: this.list(), folders: this.folders },
-      null,
-      2
-    );
-    const tmp = this.filePath + '.tmp';
-    fs.writeFileSync(tmp, data, 'utf8');
-    if (fs.existsSync(this.filePath)) {
-      fs.copyFileSync(this.filePath, this.filePath + '.bak');
-    }
-    fs.renameSync(tmp, this.filePath);
+    atomicWriteJson(this.filePath, {
+      version: 1,
+      projects: this.list(),
+      folders: this.folders.list(),
+    });
   }
 }

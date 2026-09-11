@@ -6,7 +6,7 @@ import { BatchStore } from './storage/batchStore';
 import { ChainStore } from './storage/chainStore';
 import { CaptureProxy } from './proxy/captureProxy';
 import { ExtensionReceiver } from './extension/extensionReceiver';
-import { Settings } from './settings';
+import { Settings, bindSettingsInstance } from './settings';
 import { ScheduleManager } from './scheduler/scheduleManager';
 import { shouldCapture, hostnameOf } from './captureFilter';
 import { registerIpc, runChain } from './ipc/handlers';
@@ -49,6 +49,20 @@ let batchStore: BatchStore;
 let chainStore: ChainStore;
 let userDataDir: string;
 
+// ── 无 GPU 环境降级 ──
+// 虚拟机 / 远程桌面 / CI 等无 GPU 环境下，Chromium 的 GPU 进程会反复崩溃，
+// 达到阈值后触发 FATAL「GPU process isn't usable」直接终止应用。
+// 设置 DISABLE_GPU=1 可关闭硬件加速改用软件渲染（必须在 app ready 前调用）。
+if (process.env.DISABLE_GPU === '1') {
+  app.disableHardwareAcceleration();
+  // 某些受限环境（容器 / 沙箱）连 GPU 子进程都无法 fork，
+  // 此时把 GPU 相关逻辑收进浏览器进程内执行。
+  app.commandLine.appendSwitch('in-process-gpu');
+  // 同一个受限环境下渲染进程同样会因沙箱初始化失败而被杀（exitCode=1），
+  // 表现为窗口黑屏；关闭 Chromium 沙箱后渲染进程可正常启动。
+  app.commandLine.appendSwitch('no-sandbox');
+}
+
 // ── 单实例锁 ──
 // 防止应用被多次启动导致存在多个 ScheduleManager 实例：每个实例都会从
 // schedules.json 恢复已启用任务并各自排定计时器，最终表现为定时任务「重复执行两次」。
@@ -77,18 +91,47 @@ function createWindow(): void {
     },
   });
 
-  // 诊断：把渲染进程的控制台（含报错）写入日志，便于排查渲染崩溃
-  mainWindow.webContents.on('console-message', (_e, level, message, sourceId) => {
+  // 诊断：把渲染进程的控制台（含报错）与加载生命周期写入日志，便于排查白屏/黑屏
+  const logRender = (msg: string): void => {
     try {
-      const line = `[${new Date().toISOString()}] L${level} ${sourceId}\n${message}\n\n`;
-      fs.appendFileSync(path.join(userDataDir, 'render_console.log'), line, 'utf8');
+      fs.appendFileSync(
+        path.join(userDataDir, 'render_console.log'),
+        `[${new Date().toISOString()}] ${msg}\n\n`,
+        'utf8'
+      );
     } catch {
       /* ignore */
     }
-  });
+  };
 
-  if (process.env.ELECTRON_RENDERER_URL) {
-    mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
+  mainWindow.webContents.on('console-message', (_e, level, message, sourceId) => {
+    logRender(`L${level} ${sourceId}\n${message}`);
+  });
+  mainWindow.webContents.on('did-start-loading', () => logRender('EVENT did-start-loading'));
+  mainWindow.webContents.on('dom-ready', () => logRender('EVENT dom-ready'));
+  mainWindow.webContents.on('did-finish-load', () => logRender('EVENT did-finish-load'));
+  mainWindow.webContents.on(
+    'did-fail-load',
+    (_e, code, desc, url, isMainFrame) => {
+      logRender(
+        `EVENT did-fail-load code=${code} desc=${desc} url=${url} isMainFrame=${isMainFrame}`
+      );
+    }
+  );
+  mainWindow.webContents.on('preload-error', (_e, preloadPath, error) => {
+    logRender(`EVENT preload-error path=${preloadPath} err=${error.message}`);
+  });
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    logRender(`EVENT render-process-gone ${JSON.stringify(details)}`);
+  });
+  mainWindow.webContents.on('unresponsive', () => logRender('EVENT unresponsive'));
+
+  const target = process.env.ELECTRON_RENDERER_URL;
+  logRender(
+    `LOAD target=${target || '(file) ' + path.join(__dirname, '../renderer/index.html')}`
+  );
+  if (target) {
+    mainWindow.loadURL(target);
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
   }
@@ -100,6 +143,7 @@ app.whenReady().then(() => {
   const dataDir = resolveDataDir(userData);
   store = new InterfaceStore(path.join(dataDir, 'interfaces.json'));
   settings = new Settings(path.join(dataDir, 'settings.json'));
+  bindSettingsInstance(settings);
 
   // 抓取统一入口：先过白名单过滤，再按域名自动分组（仅新建记录）
   const onCapture = (input: { url: string }) => {
@@ -122,7 +166,9 @@ app.whenReady().then(() => {
   proxy = new CaptureProxy(
     PROXY_PORT,
     path.join(dataDir, 'mitm-ca'),
-    (input) => onCapture(input)
+    (input) => onCapture(input),
+    // 代理此前只捕获请求不捕获响应，导致走系统代理抓的接口看不到响应内容
+    (method, url, response) => onResponse(method, url, response)
   );
   extension = new ExtensionReceiver(
     EXTENSION_PORT,

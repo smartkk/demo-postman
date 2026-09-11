@@ -24,7 +24,7 @@ import type {
   ScheduleConfig,
   ScheduleRunResult,
 } from '../../shared/types';
-import { sendRequest } from '../request/sender';
+import { AUTO_TIMEOUT_MS, sendRequest } from '../request/sender';
 import { resolveDynamic, resolveEnv, runBatchCall } from '../request/batchRunner';
 
 /** 在途请求的中断控制器（按接口 id 索引），用于「取消发送」。 */
@@ -87,7 +87,8 @@ export async function runChain(
     };
     const resolved = env ? resolveEnv(request, env) : request;
     try {
-      const resp = await sendRequest(resolved, 0);
+      // 链式调用会自动跑完所有步骤，属于无人值守场景，需要超时兜底
+      const resp = await sendRequest(resolved, 0, undefined, AUTO_TIMEOUT_MS);
       // 提取声明字段
       const extracted: Record<string, string> = {};
       if (step.extract && resp.body) {

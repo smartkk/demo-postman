@@ -5,11 +5,17 @@ import type { CaptureInput, InterfaceRecord } from '../../../shared/types';
 export type SortKey = 'updated' | 'calls' | 'name' | 'method';
 export type StatusFilter = 'all' | 'success' | 'fail' | 'none';
 
+/** 搜索时每条记录的响应体最多参与匹配的字符数。 */
+const SEARCH_BODY_LIMIT = 2048;
+
 export function useInterfaces() {
   const [list, setList] = useState<InterfaceRecord[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [keyword, setKeyword] = useState('');
+  // 过滤用的关键字（输入防抖后更新）：搜索需要对每条记录做字符串拼接，
+  // 逐字符重算在几百条记录、且部分响应体达 MB 级时会明显卡顿。
+  const [queryKeyword, setQueryKeyword] = useState('');
   const [methodFilter, setMethodFilter] = useState('ALL');
   const [sort, setSort] = useState<SortKey>('updated');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -23,6 +29,12 @@ export function useInterfaces() {
       setFolders(f);
     });
   }, []);
+
+  // 搜索防抖：输入框保持即时响应，只有实际过滤延迟执行
+  useEffect(() => {
+    const timer = setTimeout(() => setQueryKeyword(keyword), 200);
+    return () => clearTimeout(timer);
+  }, [keyword]);
 
   const addManual = useCallback(async (input: CaptureInput) => {
     const r = await api.addManual(input);
@@ -106,7 +118,7 @@ export function useInterfaces() {
   );
 
   const filtered = useMemo(() => {
-    const kw = keyword.trim().toLowerCase();
+    const kw = queryKeyword.trim().toLowerCase();
     let arr = list.filter((it) => {
       if (methodFilter !== 'ALL' && it.method !== methodFilter) return false;
       if (statusFilter !== 'all') {
@@ -116,13 +128,15 @@ export function useInterfaces() {
         if (statusFilter === 'none' && st !== 0) return false;
       }
       if (kw) {
+        // 响应体单条可达 MB 级，全量拼接会让每次过滤做百万字符级运算。
+        // 这里只取前 2KB 参与匹配，足以覆盖按响应内容查找的常见场景。
         const hay = [
           it.method,
           it.url,
           it.host,
           it.name || '',
           it.body || '',
-          it.lastResponse?.body || '',
+          (it.lastResponse?.body || '').slice(0, SEARCH_BODY_LIMIT),
           JSON.stringify(it.query),
           JSON.stringify(it.headers),
         ]
@@ -146,7 +160,7 @@ export function useInterfaces() {
       }
     });
     return arr;
-  }, [list, keyword, methodFilter, statusFilter, sort]);
+  }, [list, queryKeyword, methodFilter, statusFilter, sort]);
 
   const selected = list.find((it) => it.id === selectedId) || null;
 

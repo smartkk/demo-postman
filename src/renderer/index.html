@@ -3,11 +3,28 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      内容安全策略：默认只允许本应用资源。
+      - script 需 'unsafe-inline'/'unsafe-eval'：Vite dev 的 HMR 与 React Refresh 依赖它们。
+      - style/font 放开 Google Fonts：index.html 引用了 Poppins。
+      - 渲染进程不直接发网络请求（全部走 IPC），因此 connect-src 收紧到 'self'。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-src 'none'"
+    />
     <title>Demo Postman · 接口记录工具</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <!--
+      非阻塞加载：默认的 <link rel="stylesheet"> 是渲染阻塞的，网络不通时（内网/离线）
+      会一直挂住首屏。Poppins 已有 system-ui/Segoe UI 兜底，先以 print 方式下载、
+      加载完再切回 all，即使字体最终没到也不影响界面可用性。
+    -->
     <link
       href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
   </head>
   <body>

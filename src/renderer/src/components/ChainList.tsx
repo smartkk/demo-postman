@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useFolderCrud } from '../hooks/useFolderCrud';
 import { Plus, FolderPlus, Folder, Trash2, GitBranch } from 'lucide-react';
 import { api } from '../api/client';
 import type { ChainProject } from '../../../shared/types';
@@ -11,8 +12,10 @@ interface Props {
 
 export function ChainList({ activeId, onSelect }: Props) {
   const [projects, setProjects] = useState<ChainProject[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
-  const [newFolderName, setNewFolderName] = useState('');
+  const { folders, setFolders, newFolderName, setNewFolderName, addFolder } = useFolderCrud({
+    listFolders: api.listChainFolders,
+    createFolder: api.createChainFolder,
+  });
 
   const refresh = async () => {
     const [list, f] = await Promise.all([api.listChains(), api.listChainFolders()]);
@@ -29,14 +32,6 @@ export function ChainList({ activeId, onSelect }: Props) {
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const addFolder = async () => {
-    const name = newFolderName.trim();
-    if (!name) return;
-    setNewFolderName('');
-    await api.createChainFolder(name);
-    await refresh();
-  };
 
   const deleteProject = async (id: string) => {
     await api.deleteChain(id);

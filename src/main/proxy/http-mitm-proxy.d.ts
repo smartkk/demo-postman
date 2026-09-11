@@ -7,6 +7,11 @@ declare module 'http-mitm-proxy' {
       fn: (ctx: any, chunk: Buffer, callback: (err?: Error | null, chunk?: Buffer) => void) => void
     ): void;
     onRequestEnd(fn: (ctx: any, callback: (err?: Error | null) => void) => void): void;
+    onResponse(fn: (ctx: any, callback: (err?: Error | null) => void) => void): void;
+    onResponseData(
+      fn: (ctx: any, chunk: Buffer, callback: (err?: Error | null, chunk?: Buffer) => void) => void
+    ): void;
+    onResponseEnd(fn: (ctx: any, callback: (err?: Error | null) => void) => void): void;
     listen(options: { port?: number; host?: string; sslCaDir?: string }, callback?: () => void): void;
     close(): void;
   }

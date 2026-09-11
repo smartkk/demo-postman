@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import { useFolderCrud } from '../hooks/useFolderCrud';
 import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, ArrowUp, ArrowDown, Download, Search, Eye } from 'lucide-react';
 import { api } from '../api/client';
 import { Select } from './ui/Select';
@@ -52,7 +53,10 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
 
   // ── 持久化 ──
   const [projects, setProjects] = useState<ChainProject[]>([]);
-  const [folders, setFolders] = useState<string[]>([]);
+  const { folders, setFolders } = useFolderCrud({
+    listFolders: api.listChainFolders,
+    createFolder: api.createChainFolder,
+  });
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [projectName, setProjectName] = useState('未命名链式任务');
   const [folder, setFolder] = useState('');
@@ -284,16 +288,6 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
       newProject();
       onSelect(null);
     }
-    await refreshList();
-  };
-
-  const [newFolderName, setNewFolderName] = useState('');
-  const addFolder = async () => {
-    const n = newFolderName.trim();
-    if (!n) return;
-    await api.createChainFolder(n);
-    setFolder(n);
-    setNewFolderName('');
     await refreshList();
   };
 

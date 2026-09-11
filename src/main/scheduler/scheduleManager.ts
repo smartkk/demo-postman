@@ -4,7 +4,7 @@ import type {
   ChainProject,
   ChainRunResult,
 } from '../../shared/types';
-import { sendRequest } from '../request/sender';
+import { AUTO_TIMEOUT_MS, sendRequest } from '../request/sender';
 import { ScheduleStore } from './scheduleStore';
 
 export interface ScheduleChainDeps {
@@ -128,7 +128,8 @@ export class ScheduleManager {
           at: last.at,
         };
       }
-      const resp = await sendRequest(s.input);
+      // 定时调度同样无人值守，超时避免周期性任务累积挂起连接
+      const resp = await sendRequest(s.input, 0, undefined, AUTO_TIMEOUT_MS);
       return {
         status: resp.status,
         statusText: resp.statusText,

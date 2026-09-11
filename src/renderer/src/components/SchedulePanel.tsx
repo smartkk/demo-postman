@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { Fragment, useState, useEffect } from 'react';
 import { History, Calendar, Plus, Save, RotateCcw, Send } from 'lucide-react';
 import { DateTimeField } from './DateTimeField';
 import { Select } from './ui/Select';
@@ -488,13 +488,17 @@ export function SchedulePanel({ records, activeId }: Props) {
                       <tbody>
                         {displayHistory.map((r, i) => {
                           const stBadge = resultStatusBadge(r);
-                          const open = expandedResultId === `${s.id}__${i}`;
+                          // 用响应时间戳而非数组下标做身份：历史是往前插入的，
+                          // 用下标会导致新记录进来时「展开的行」错位到别的记录上。
+                          const rowKey = `${s.id}__${r.at || i}`;
+                          const open = expandedResultId === rowKey;
                           return (
-                            <>
+                            // key 必须落在 map 直接返回的最外层元素上。
+                            // 原先放在内层 <tr>，Fragment 反而没有 key，于是触发 React 警告。
+                            <Fragment key={rowKey}>
                               <tr
-                                key={i}
                                 onClick={() =>
-                                  setExpandedResultId(open ? null : `${s.id}__${i}`)
+                                  setExpandedResultId(open ? null : rowKey)
                                 }
                                 className={`cursor-pointer border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20 ${
                                   open ? 'bg-slate-700/30' : ''
@@ -535,7 +539,7 @@ export function SchedulePanel({ records, activeId }: Props) {
                                   </td>
                                 </tr>
                               )}
-                            </>
+                            </Fragment>
                           );
                         })}
                       </tbody>

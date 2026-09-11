@@ -7,6 +7,7 @@ const DEFAULTS: CaptureSettings = {
   excludeHosts: [],
   autoGroup: true,
   dedupByFullUrl: false,
+  verifyTls: false,
   environments: { 默认: {} },
   activeEnv: '默认',
 };
@@ -65,4 +66,14 @@ export class Settings {
   private emit(): void {
     for (const cb of this.listeners) cb();
   }
+}
+
+// 运行时注入的当前设置实例，供 sender 等在调用链上不便逐层透传 settings 的模块读取。
+// 设置在 UI 中可随时修改并即时生效，无需层层传递。
+let activeInstance: Settings | null = null;
+export function bindSettingsInstance(s: Settings): void {
+  activeInstance = s;
+}
+export function getActiveSettings(): Settings | null {
+  return activeInstance;
 }

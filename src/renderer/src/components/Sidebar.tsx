@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   Search,
   Trash2,
@@ -20,6 +20,7 @@ import {
   Inbox,
 } from 'lucide-react';
 import type { InterfaceRecord } from '../../../shared/types';
+import { buildFolderBuckets } from '../utils/groupByFolder';
 import type {
   SortKey,
   StatusFilter,
@@ -108,12 +109,14 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
   const [batchOpen, setBatchOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const capturedCount = filtered.filter((it) => it.source === 'captured').length;
-  const manualCount = filtered.length - capturedCount;
-
   const [showFilters, setShowFilters] = useState(false);
 
-  const present = new Set(filtered.map((it) => it.folder || ''));
+  // 一次遍历完成「按文件夹分桶」+「抓取来源计数」（逻辑抽到纯函数 buildFolderBuckets，便于单测，见 P1-3）
+  const { buckets, capturedCount } = useMemo(() => buildFolderBuckets(filtered), [filtered]);
+
+  const manualCount = filtered.length - capturedCount;
+
+  const present = new Set(buckets.keys());
   const customFolders = [...folders];
   for (const f of customFolders) present.delete(f);
   const extra = [...present].filter((f) => f !== '').sort();
@@ -494,8 +497,8 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
           </div>
         ) : (
           groupOrder.map((f) => {
-            const items = filtered.filter((it) => (it.folder || '') === f);
-            if (items.length === 0) return null;
+            const items = buckets.get(f);
+            if (!items || items.length === 0) return null;
             const isUngrouped = f === '';
             const title = isUngrouped ? '未分组' : f;
             const key = isUngrouped ? '__ungrouped__' : f;

@@ -16,6 +16,8 @@ export interface CaptureSettings {
   includeHosts: string[];
   /** 排除这些主机。 */
   excludeHosts: string[];
+  /** 发送 / 抓取请求时是否校验 TLS 证书。false=接受自签名 / 内网证书（默认，适合调试）；true=严格校验，自签名证书会被拒绝。 */
+  verifyTls?: boolean;
   /** 抓取请求是否按域名（hostname）自动建分组。 */
   autoGroup: boolean;
   /** 去重键是否包含 query 参数（true=按完整 URL 去重，false=仅 method+host+path）。 */

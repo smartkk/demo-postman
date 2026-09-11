@@ -4,7 +4,7 @@ import type {
   BatchCallResult,
   CaptureInput,
 } from '../../shared/types';
-import { sendRequest } from './sender';
+import { AUTO_TIMEOUT_MS, sendRequest } from './sender';
 
 /** 并发模式下的最大同时请求数，避免海量行瞬间建立大量 socket。 */
 export const BATCH_CONCURRENCY = 20;
@@ -141,7 +141,8 @@ export async function runBatchCall(
     for (const [k, v] of Object.entries(row)) resolvedRow[k] = resolveDynamic(v);
     const request = resolvePlaceholders(baseResolved, resolvedRow);
     try {
-      const resp = await sendRequest(request, 0);
+      // 批量是无人值守场景，必须带超时，否则服务不可达时会堆积永不释放的连接
+      const resp = await sendRequest(request, 0, undefined, AUTO_TIMEOUT_MS);
       return {
         index,
         vars: resolvedRow,
