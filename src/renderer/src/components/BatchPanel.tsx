@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, memo, useMemo } from 'react';
 import { useFolderCrud } from '../hooks/useFolderCrud';
 import {
   X,
@@ -11,6 +11,12 @@ import {
   Save,
   FolderOpen,
   Sparkles,
+  Search,
+  Download,
+  ChevronDown,
+  ChevronRight,
+  Pause,
+  FileText,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { Select } from './ui/Select';
@@ -21,8 +27,20 @@ import type {
   BatchCallResult,
   BatchProject,
   BatchRow,
+  BatchProgressState,
+  InterfaceRecord,
 } from '../../../shared/types';
 import { relTime } from './method';
+
+/* ── 模块级纯函数：结果状态徽章（置于组件外，便于 memo 表复用且无闭包依赖） ── */
+function makeStatusBadge(r: BatchCallResult): { text: string; cls: string } {
+  if (r.error) return { text: '错误', cls: 'bg-red-500/20 text-red-400' };
+  if (r.status >= 200 && r.status < 400)
+    return { text: `${r.status}`, cls: 'bg-emerald-500/20 text-emerald-400' };
+  if (r.status >= 400)
+    return { text: `${r.status}`, cls: 'bg-yellow-500/20 text-yellow-400' };
+  return { text: `${r.status}`, cls: 'bg-slate-700 text-slate-400' };
+}
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
@@ -50,6 +68,35 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const [results, setResults] = useState<BatchCallResult[] | null>(null);
   const [error, setError] = useState('');
 
+  // 已记录的接口（历史接口）：可导入为基础请求，导入后仍可继续手动修改
+  const [localRecords, setLocalRecords] = useState<InterfaceRecord[]>([]);
+  const [showLocal, setShowLocal] = useState(false);
+  const [localKw, setLocalKw] = useState('');
+  const [sourceId, setSourceId] = useState<string | null>(null);
+
+  // 参数行区：折叠 + 关键字搜索
+  const [rowsCollapsed, setRowsCollapsed] = useState(false);
+  const [rowKw, setRowKw] = useState('');
+
+  // 结果区：折叠 + 成功/失败过滤 + 按参数/响应搜索
+  const [resultCollapsed, setResultCollapsed] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'fail'>('all');
+  const [resultKw, setResultKw] = useState('');
+
+  // 执行进度与暂停：结果流式返回，暂停可中断后续请求
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+  const [stopped, setStopped] = useState(false);
+  const runIdRef = useRef('');
+
+  // 断点续跑：记录本轮已完成的原始行号（参数行内容变化则失效）
+  const doneIdxRef = useRef<Set<number>>(new Set());
+  const rowsSigRef = useRef('');
+  /** 结果镜像：用于结束时把断点进度落盘（setState 是异步的） */
+  const resultsRef = useRef<BatchCallResult[] | null>(results);
+  const [resumeInfo, setResumeInfo] = useState<{ done: number; total: number } | null>(
+    null
+  );
+
   // ── 持久化：已保存的批量项目 & 文件夹 ──
   const [projects, setProjects] = useState<BatchProject[]>([]);
   const { folders, setFolders } = useFolderCrud({
@@ -74,6 +121,11 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     });
     return off;
   }, [refreshList]);
+
+  // 加载已记录的接口，供「选择历史接口」
+  useEffect(() => {
+    api.getList().then(setLocalRecords).catch(() => setLocalRecords([]));
+  }, []);
 
   // 根据左侧栏选中的项目加载编辑区
   useEffect(() => {
@@ -124,16 +176,22 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setVariables(next);
   };
 
-  /* ── 行编辑 ── */
-  const setCell = (rowIdx: number, key: string, val: string) =>
-    setRows((rs) => rs.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r)));
-  const addRow = () => setRows((rs) => [...rs, {}]);
-  const removeRow = (idx: number) =>
-    setRows((rs) => rs.filter((_, i) => i !== idx));
+  /* ── 行编辑（用 useCallback 固定引用，避免破坏下游 memo） ── */
+  const setCell = useCallback(
+    (rowIdx: number, key: string, val: string) =>
+      setRows((rs) => rs.map((r, i) => (i === rowIdx ? { ...r, [key]: val } : r))),
+    []
+  );
+  const addRow = useCallback(() => setRows((rs) => [...rs, {}]), []);
+  const removeRow = useCallback(
+    (idx: number) => setRows((rs) => rs.filter((_, i) => i !== idx)),
+    []
+  );
 
   /* ── 从 CSV/JSON 导入行 ── */
   const [importText, setImportText] = useState('');
   const [showImport, setShowImport] = useState(false);
+  const [fileName, setFileName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   const parseCsv = (text: string): { headers: string[]; rows: BatchRow[] } => {
@@ -199,12 +257,20 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     }
   };
 
+  const clearFile = () => {
+    setFileName('');
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
   const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       applyCsv(String(reader.result ?? ''));
+      // 清空 input 值，使重复上传同一文件也能再次触发 onChange
+      e.target.value = '';
     };
     reader.onerror = () => setError('文件读取失败');
     reader.readAsText(file, 'utf-8');
@@ -330,6 +396,30 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     }
   };
 
+  /* ── 历史接口：导入为基础请求 ── */
+  /** 把历史接口还原成完整 URL（base url + query）。 */
+  const fullUrlOf = (rec: InterfaceRecord) => {
+    const qs = Object.entries(rec.query || {})
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    return qs ? `${rec.url}?${qs}` : rec.url;
+  };
+
+  /** 选中历史接口：填充 method/url/headers/body，之后仍可手动改成自定义请求。 */
+  const importFromLocal = (rec: InterfaceRecord) => {
+    setMethod((rec.method || 'GET').toUpperCase());
+    setUrl(fullUrlOf(rec));
+    setHeaders({ ...(rec.headers || {}) });
+    setBody(rec.body ?? '');
+    setSourceId(rec.id);
+    setShowLocal(false);
+    setLocalKw('');
+    setError('');
+  };
+
+  /** 转为自定义请求：仅解绑来源，保留当前已填内容以便继续编辑。 */
+  const detachSource = () => setSourceId(null);
+
   /* ── 保存当前配置为项目 ── */
   const buildProject = (): Omit<BatchProject, 'id' | 'createdAt' | 'updatedAt'> => ({
     name: projectName.trim() || '未命名批量任务',
@@ -342,6 +432,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     sequential,
     folder,
     ...(paramFolder ? { paramFolder } : {}),
+    sourceInterfaceId: sourceId ?? undefined,
   });
 
   const doSave = async () => {
@@ -376,8 +467,12 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setRows(p.rows || []);
     setSequential(p.sequential);
     setFolder(p.folder || '');
-    setResults(p.results ?? null);
+    setSourceId(p.sourceInterfaceId ?? null);
     setError('');
+    setFileName('');
+    setStopped(false);
+    setProgress(null);
+
     // 绑定参数文件夹的项目：恢复绑定并刷新预览
     if (p.paramFolder) {
       setParamFolder(p.paramFolder);
@@ -386,25 +481,33 @@ export function BatchPanel({ selectedId, onClose }: Props) {
       setParamFolder('');
       setFolderInfo(null);
     }
+
+    // 断点续跑：签名一致才恢复，否则视为失效并清理掉持久化的断点
+    const sig = JSON.stringify(p.rows || []);
+    const total = p.rows?.length ?? 0;
+    const prog = p.progress;
+    const valid =
+      !!prog && prog.rowsSignature === sig && (prog.doneIndexes?.length ?? 0) < total;
+    if (valid && prog) {
+      doneIdxRef.current = new Set(prog.doneIndexes);
+      rowsSigRef.current = sig;
+      setResumeInfo({ done: prog.doneIndexes.length, total });
+      setResults(prog.results ?? p.results ?? null);
+      resultsRef.current = prog.results ?? null;
+    } else {
+      doneIdxRef.current = new Set();
+      rowsSigRef.current = sig;
+      setResumeInfo(null);
+      setResults(p.results ?? null);
+      resultsRef.current = p.results ?? null;
+      if (prog) api.saveBatchProgress(p.id, null).catch(() => {});
+    }
   };
 
-  /* ── 运行：当前编辑区 或 已保存项目 ── */
-  const run = useCallback(
-    async (useSaved: boolean) => {
-      if (useSaved && activeId) {
-        setRunning(true);
-        setError('');
-        try {
-          const res = await api.runBatch(activeId);
-          setResults(res);
-          await refreshList();
-        } catch (e) {
-          setError(e instanceof Error ? e.message : String(e));
-        } finally {
-          setRunning(false);
-        }
-        return;
-      }
+  /* ── 运行：当前编辑区 / 已保存项目（结果流式返回 + 可暂停 + 可断点续跑） ── */
+  const run = async (mode: 'run' | 'saved' | 'resume') => {
+    const useSaved = mode === 'saved';
+    if (mode === 'run') {
       if (!url.trim()) {
         setError('请填写请求地址');
         return;
@@ -413,31 +516,124 @@ export function BatchPanel({ selectedId, onClose }: Props) {
         setError('请至少添加一行参数，或绑定一个参数文件夹');
         return;
       }
-      setError('');
-      setRunning(true);
-      setResults(null);
-      try {
-        const input: BatchCallInput = {
-          method,
-          url,
-          headers,
-          body: body.trim() ? body : null,
-          variables,
-          // 绑定文件夹时行数据由主进程执行时实时读取，rows 仅作回退
-          rows: paramFolder ? [] : rows,
-          sequential,
-          ...(paramFolder ? { paramFolder } : {}),
-        };
-        const res = await api.batchSend(input);
-        setResults(res);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
-      } finally {
-        setRunning(false);
+    }
+
+    // 参数行内容变化 → 断点失效（避免用旧进度去跳新的行）
+    const sig = JSON.stringify(rows);
+    if (sig !== rowsSigRef.current) {
+      rowsSigRef.current = sig;
+      doneIdxRef.current = new Set();
+      if (mode === 'resume') {
+        setError('参数行已变化，断点已失效，请重新运行');
+        setResumeInfo(null);
+        return;
       }
-    },
-    [url, rows, method, headers, body, variables, sequential, activeId, refreshList, paramFolder]
-  );
+    }
+
+    const done = doneIdxRef.current;
+    const all = rows.map((_, i) => i);
+    // 续跑：把已完成的行号交给主进程跳过；全量运行：重置断点
+    const skip = mode === 'resume' ? all.filter((i) => done.has(i)) : [];
+    const pending = all.filter((i) => !skip.includes(i));
+    // 绑定参数文件夹时行数由主进程执行时才能确定，此处不校验
+    if (!paramFolder && pending.length === 0) {
+      setError('没有待执行的请求');
+      return;
+    }
+
+    const runId = `b${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+    runIdRef.current = runId;
+    setRunning(true);
+    setStopped(false);
+    setError('');
+    if (mode !== 'resume') {
+      setResults([]);
+      resultsRef.current = [];
+      doneIdxRef.current = new Set();
+    }
+    setProgress({ done: doneIdxRef.current.size, total: rows.length });
+    setResultCollapsed(false);
+
+    /** 合并一条结果：续跑时保留上一轮已完成的行（同时镜像到 ref 供结束时落盘） */
+    const mergeResult = (list: BatchCallResult[], r: BatchCallResult) => {
+      const map = new Map(list.map((x) => [x.index, x]));
+      map.set(r.index, r);
+      const next = [...map.values()].sort((a, b) => a.index - b.index);
+      resultsRef.current = next;
+      return next;
+    };
+
+    // 订阅本次执行的进度：每完成一条即插入结果，无需等待整批结束
+    const off = api.onBatchProgress((p) => {
+      if (p.runId !== runIdRef.current) return;
+      doneIdxRef.current.add(p.result.index);
+      setResults((prev) => mergeResult(prev ?? [], p.result));
+      setProgress({ done: doneIdxRef.current.size, total: rows.length });
+    });
+
+    try {
+      const res = useSaved
+        ? await api.runBatch(activeId ?? '', runId, skip)
+        : await api.batchSend(
+            {
+              method,
+              url,
+              headers,
+              body: body.trim() ? body : null,
+              variables,
+              // 绑定文件夹时行数据由主进程执行时实时读取，rows 仅作回退
+              rows: paramFolder ? [] : rows,
+              sequential,
+              skipIndexes: skip,
+              ...(paramFolder ? { paramFolder } : {}),
+            },
+            runId
+          );
+      res.forEach((r) => doneIdxRef.current.add(r.index));
+      setResults((prev) => res.reduce((acc, r) => mergeResult(acc, r), prev ?? []));
+      setProgress({ done: doneIdxRef.current.size, total: rows.length });
+      if (useSaved) await refreshList();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      off();
+      setRunning(false);
+      // 还有未执行的行 → 允许断点续跑
+      const finished = doneIdxRef.current.size;
+      const total = rows.length;
+      setResumeInfo(finished < total ? { done: finished, total } : null);
+
+      // 已保存的任务：把断点进度落盘，重启应用后可继续
+      const pid = activeId;
+      if (pid) {
+        const state: BatchProgressState | null =
+          finished < total && finished > 0
+            ? {
+                doneIndexes: [...doneIdxRef.current].sort((a, b) => a - b),
+                results: resultsRef.current ?? [],
+                rowsSignature: sig,
+                updatedAt: new Date().toISOString(),
+              }
+            : null;
+        api.saveBatchProgress(pid, state).catch(() => {
+          /* 落盘失败不影响本次执行结果 */
+        });
+      }
+    }
+  };
+
+  /** 暂停：中断在途请求并停止调度后续请求，已返回的结果保留。 */
+  const pause = async () => {
+    const runId = runIdRef.current;
+    if (!runId) return;
+    try {
+      const hit = await api.cancelBatch(runId);
+      setStopped(true);
+      if (!hit) setError('未能中断：该批次可能已经结束');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const newProject = () => {
     setActiveId(null);
@@ -449,10 +645,19 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setRows([{ id: '1' }, { id: '2' }]);
     setSequential(true);
     setFolder('');
+    setSourceId(null);
     setResults(null);
+    resultsRef.current = null;
     setError('');
     setParamFolder('');
     setFolderInfo(null);
+    setFileName('');
+    // 新建任务：重置断点信息
+    doneIdxRef.current = new Set();
+    rowsSigRef.current = '';
+    setResumeInfo(null);
+    setStopped(false);
+    setProgress(null);
   };
 
   const deleteProject = async (id: string) => {
@@ -461,18 +666,56 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     await refreshList();
   };
 
-  const statusBadge = (r: BatchCallResult) => {
-    if (r.error) return { text: '错误', cls: 'bg-red-500/20 text-red-400' };
-    if (r.status >= 200 && r.status < 400)
-      return { text: `${r.status}`, cls: 'bg-emerald-500/20 text-emerald-400' };
-    if (r.status >= 400)
-      return { text: `${r.status}`, cls: 'bg-yellow-500/20 text-yellow-400' };
-    return { text: `${r.status}`, cls: 'bg-slate-700 text-slate-400' };
-  };
+  // 来源历史接口的展示名（记录列表加载完成后才能确定是否已删除）
+  const sourceRec = localRecords.find((r) => r.id === sourceId);
+  const sourceLabel = sourceRec
+    ? sourceRec.name || sourceRec.path || sourceRec.url
+    : localRecords.length > 0
+      ? '（接口已删除）'
+      : '';
+
+  const statusBadge = makeStatusBadge;
+
+  /** 是否成功：2xx/3xx 且无错误（与统计口径一致）。 */
+  const isOkResult = (r: BatchCallResult) =>
+    !r.error && r.status >= 200 && r.status < 400;
+
+  /* ── 参数行搜索：按「变量名=值」匹配，保留原始行下标以便继续编辑/删除 ── */
+  const rowKwLower = rowKw.trim().toLowerCase();
+  const visibleRows = useMemo(
+    () =>
+      rows
+        .map((r, ri) => ({ r, ri }))
+        .filter(({ r }) => {
+          if (!rowKwLower) return true;
+          return variables.some((v) => `${v}=${r[v] ?? ''}`.toLowerCase().includes(rowKwLower));
+        }),
+    [rows, rowKwLower, variables]
+  );
+
+  /* ── 结果过滤：成功/失败 + 按参数值/状态码/响应内容搜索 ── */
+  const resultKwLower = resultKw.trim().toLowerCase();
+  const okCount = (results ?? []).filter(isOkResult).length;
+  const failCount = (results ?? []).length - okCount;
+  const visibleResults = useMemo(
+    () =>
+      (results ?? []).filter((r) => {
+        if (statusFilter === 'ok' && !isOkResult(r)) return false;
+        if (statusFilter === 'fail' && isOkResult(r)) return false;
+        if (!resultKwLower) return true;
+        return (
+          variables.some((v) => `${v}=${r.vars?.[v] ?? ''}`.toLowerCase().includes(resultKwLower)) ||
+          `${r.status} ${r.statusText ?? ''} ${r.error ?? ''} ${r.body ?? ''}`
+            .toLowerCase()
+            .includes(resultKwLower)
+        );
+      }),
+    [results, resultKwLower, statusFilter, variables]
+  );
 
   return (
     <>
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col" data-select-scope>
       {/* 编辑区 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -523,6 +766,90 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
           {/* 基础请求 */}
           <div className="space-y-3 rounded-xl bg-slate-800/30 p-3">
+            <div className="relative flex items-center justify-between gap-2">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-[12px] font-medium text-slate-400">
+                  基础请求
+                </span>
+                {sourceId && sourceLabel && (
+                  <span className="flex min-w-0 items-center gap-1 rounded bg-slate-700/50 px-1.5 py-0.5 text-[10.5px] text-slate-300">
+                    <span className="shrink-0 text-slate-500">来源</span>
+                    <span className="max-w-[180px] truncate">{sourceLabel}</span>
+                    <button
+                      onClick={detachSource}
+                      title="转为自定义请求：仅解除来源标记，保留当前内容，可继续手动修改"
+                      className="shrink-0 text-slate-500 transition hover:text-slate-200 cursor-pointer"
+                    >
+                      <X size={10} />
+                    </button>
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setShowLocal((v) => !v)}
+                className={`flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-medium transition cursor-pointer ${
+                  showLocal
+                    ? 'bg-brand/30 text-brand-light'
+                    : 'bg-slate-700/40 text-slate-300 hover:bg-slate-700/60'
+                }`}
+              >
+                <Download size={12} /> 选择历史接口
+              </button>
+
+              {/* 历史接口选择浮层 */}
+              {showLocal && (
+                <div className="absolute right-0 top-8 z-20 max-h-[300px] w-[380px] overflow-hidden rounded-xl border border-slate-700/50 bg-slate-900/95 shadow-2xl backdrop-blur">
+                  <div className="flex items-center gap-2 border-b border-slate-700/50 px-2.5 py-2">
+                    <Search size={13} className="shrink-0 text-slate-500" />
+                    <input
+                      value={localKw}
+                      onChange={(e) => setLocalKw(e.target.value)}
+                      placeholder="搜索历史接口（名称/URL/方法）"
+                      className="min-w-0 flex-1 bg-transparent text-[12px] outline-none"
+                    />
+                    <button
+                      onClick={() => setShowLocal(false)}
+                      className="rounded p-0.5 text-slate-500 transition hover:text-slate-200 cursor-pointer"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <div className="max-h-[250px] overflow-y-auto">
+                    {localRecords.length === 0 && (
+                      <div className="px-3 py-6 text-center text-[11.5px] text-slate-500">
+                        暂无历史接口记录，可直接手动填写下方请求
+                      </div>
+                    )}
+                    {localRecords
+                      .filter((r) => {
+                        const kw = localKw.trim().toLowerCase();
+                        if (!kw) return true;
+                        return [r.method, r.url, r.name || '', r.path || '']
+                          .join(' ')
+                          .toLowerCase()
+                          .includes(kw);
+                      })
+                      .map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => importFromLocal(r)}
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-slate-700/40 cursor-pointer ${
+                            r.id === sourceId ? 'bg-brand/10' : ''
+                          }`}
+                        >
+                          <span className="shrink-0 rounded bg-slate-700/60 px-1.5 py-0.5 text-[10px] font-medium text-brand-light">
+                            {r.method}
+                          </span>
+                          <span className="min-w-0 flex-1 truncate text-[11.5px] text-slate-200">
+                            {r.name || r.path || r.url}
+                          </span>
+                          <Download size={12} className="shrink-0 text-slate-500" />
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
             <div className="flex gap-2">
               <Select
                 value={method}
@@ -594,13 +921,25 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
           {/* 参数行 */}
           <div className="mt-4">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-[12px] font-medium text-slate-400">
-                {paramFolder
-                  ? `参数来源：文件夹（${folderInfo?.count ?? '…'} 个文件，执行时实时读取）`
-                  : '参数行（每行 = 一次调用）'}
-              </span>
-              <div className="flex gap-2">
+            <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setRowsCollapsed((v) => !v)}
+                  title={rowsCollapsed ? '展开参数行' : '折叠参数行'}
+                  className="rounded p-0.5 text-slate-400 transition hover:bg-slate-700/60 hover:text-slate-200 cursor-pointer"
+                >
+                  {rowsCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                </button>
+                <span className="text-[12px] font-medium text-slate-400">
+                  {paramFolder
+                    ? `参数来源：文件夹（${folderInfo?.count ?? '…'} 个文件，执行时实时读取）`
+                    : '参数行（每行 = 一次调用）'}
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  {rowKwLower ? `${visibleRows.length}/${rows.length} 行` : `${rows.length} 行`}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={openAiDialog}
                   title="用 AI 把原始数据整理成参数行（需在设置中配置 AI 接口）"
@@ -615,6 +954,20 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                 >
                   <FolderOpen size={12} /> 绑定文件夹
                 </button>
+                {!rowsCollapsed && (
+                  <div className="relative">
+                    <Search
+                      size={12}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
+                    />
+                    <input
+                      value={rowKw}
+                      onChange={(e) => setRowKw(e.target.value)}
+                      placeholder="搜索参数行（如 id=3）"
+                      className="w-44 rounded-md border border-slate-700/50 bg-slate-800/40 py-1 pl-7 pr-2 text-[11px] text-slate-200 outline-none focus:border-brand/60"
+                    />
+                  </div>
+                )}
                 <label className="flex cursor-pointer items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700">
                   <Upload size={12} /> 上传 CSV
                   <input
@@ -625,6 +978,22 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                     className="hidden"
                   />
                 </label>
+                {fileName && (
+                  <span
+                    className="flex max-w-[200px] items-center gap-1 rounded-md bg-brand/15 px-2 py-0.5 text-[11px] text-brand-light"
+                    title={fileName}
+                  >
+                    <FileText size={11} className="shrink-0" />
+                    <span className="truncate">{fileName}</span>
+                    <button
+                      onClick={clearFile}
+                      title="清除已选文件"
+                      className="shrink-0 text-slate-400 transition hover:text-rose-400 cursor-pointer"
+                    >
+                      <X size={11} />
+                    </button>
+                  </span>
+                )}
                 <button
                   onClick={() => setShowImport((v) => !v)}
                   className="flex items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
@@ -640,7 +1009,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
               </div>
             </div>
 
-            {showImport && (
+            {!rowsCollapsed && showImport && (
               <div className="mb-2 space-y-1.5 rounded-lg border border-slate-700/40 bg-slate-800/30 p-2">
                 <textarea
                   value={importText}
@@ -717,11 +1086,11 @@ export function BatchPanel({ selectedId, onClose }: Props) {
               </div>
             )}
 
-            {!paramFolder && (
-              <div className="overflow-x-auto rounded-lg border border-slate-700/40">
+            {!paramFolder && !rowsCollapsed && (
+              <div className="max-h-[320px] overflow-auto rounded-lg border border-slate-700/40">
                 <table className="w-full text-[12px]">
                   <thead>
-                    <tr className="border-b border-slate-700/50 text-slate-400">
+                    <tr className="sticky top-0 z-10 border-b border-slate-700/50 bg-slate-900/95 text-slate-400">
                       <th className="px-2 py-1.5 text-left font-medium">#</th>
                       {variables.map((v, i) => (
                         <th key={i} className="px-2 py-1.5 text-left font-medium">
@@ -732,35 +1101,18 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r, ri) => (
-                    <tr
-                      key={ri}
-                      className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
-                    >
-                      <td className="px-2 py-1.5 text-slate-400">{ri + 1}</td>
-                      {variables.map((v, i) => (
-                        <td key={i} className="px-2 py-1.5">
-                          <input
-                            value={r[v] ?? ''}
-                            onChange={(e) => setCell(ri, v, e.target.value)}
-                            className="w-28 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[12px] text-slate-200 outline-none focus:border-brand/60"
-                          />
-                        </td>
-                      ))}
-                      <td className="px-2 py-1.5">
-                        <button
-                          onClick={() => removeRow(ri)}
-                          className="text-slate-500 transition hover:text-rose-400 cursor-pointer"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                  {rows.length === 0 && (
+                  <ParamRows
+                    rows={visibleRows}
+                    variables={variables}
+                    onChange={setCell}
+                    onRemove={removeRow}
+                  />
+                  {visibleRows.length === 0 && (
                     <tr>
                       <td colSpan={variables.length + 2} className="py-4 text-center text-slate-500">
-                        暂无参数行，点击右上角「行」添加
+                        {rows.length === 0
+                          ? '暂无参数行，点击右上角「行」添加'
+                          : `没有匹配「${rowKw.trim()}」的参数行`}
                       </td>
                     </tr>
                   )}
@@ -772,6 +1124,12 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
           {/* 选项 + 执行 */}
           {error && <div className="mt-3 text-[12px] text-rose-400">{error}</div>}
+          {stopped && !running && (
+            <div className="mt-3 text-[12px] text-amber-400">
+              已暂停：完成 {progress?.done ?? 0}/{progress?.total ?? rows.length} 次，其余请求未执行
+              {resumeInfo ? '，可点「继续剩余」从断点接着跑。' : '。'}
+            </div>
+          )}
           <div className="mt-4 flex items-center justify-between">
             <label className="flex items-center gap-2 text-[12px] text-slate-400">
               <input
@@ -782,22 +1140,40 @@ export function BatchPanel({ selectedId, onClose }: Props) {
               />
               串行执行
             </label>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
               <button
-                onClick={() => run(false)}
+                onClick={() => run('run')}
                 disabled={running}
                 className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-50 cursor-pointer"
               >
-                <Play size={14} />{' '}
+                <Play size={14} />
                 {running
-                  ? '执行中…'
+                  ? `执行中 ${progress?.done ?? 0}/${progress?.total ?? rows.length}`
                   : paramFolder
                     ? `运行（文件夹 ${folderInfo?.count ?? '?'} 文件）`
                     : `运行（${rows.length} 次）`}
               </button>
+              {running && (
+                <button
+                  onClick={pause}
+                  title="中断在途请求，并停止调度后续请求"
+                  className="flex items-center gap-1.5 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-[13px] font-medium text-amber-300 transition hover:bg-amber-500/20 cursor-pointer"
+                >
+                  <Pause size={14} /> 暂停
+                </button>
+              )}
+              {!running && resumeInfo && (
+                <button
+                  onClick={() => run('resume')}
+                  title="跳过已完成的行，从上次中断处继续执行剩余请求"
+                  className="flex items-center gap-1.5 rounded-lg border border-brand/50 bg-brand/10 px-4 py-2 text-[13px] font-medium text-brand-light transition hover:bg-brand/20 cursor-pointer"
+                >
+                  <Play size={14} /> 继续剩余（{resumeInfo.total - resumeInfo.done}）
+                </button>
+              )}
               {activeId && (
                 <button
-                  onClick={() => run(true)}
+                  onClick={() => run('saved')}
                   disabled={running}
                   title="使用已保存的配置运行"
                   className="flex items-center gap-1.5 rounded-lg border border-brand/40 px-4 py-2 text-[13px] font-medium text-brand-light transition hover:bg-brand/10 disabled:opacity-50 cursor-pointer"
@@ -811,15 +1187,70 @@ export function BatchPanel({ selectedId, onClose }: Props) {
           {/* 结果 */}
           {results && (
             <div className="mt-4">
-              <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-slate-400">
-                执行结果（{results.length} 次，
-                {results.filter((r) => !r.error && r.status >= 200 && r.status < 400).length} 成功 /
-                {results.filter((r) => r.error || r.status >= 400).length} 失败）
+              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setResultCollapsed((v) => !v)}
+                    title={resultCollapsed ? '展开结果' : '折叠结果'}
+                    className="rounded p-0.5 text-slate-400 transition hover:bg-slate-700/60 hover:text-slate-200 cursor-pointer"
+                  >
+                    {resultCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                  </button>
+                  <span className="text-[12px] font-medium text-slate-400">
+                    执行结果（{results.length} 次，{okCount} 成功 / {failCount} 失败
+                    {resultKw.trim() || statusFilter !== 'all'
+                      ? `，显示 ${visibleResults.length} 条`
+                      : ''}
+                    ）
+                  </span>
+                </div>
+
+                {!resultCollapsed && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* 成功/失败过滤 */}
+                    <div className="flex items-center gap-1 rounded-md bg-slate-700/40 p-0.5">
+                      {(
+                        [
+                          ['all', `全部 ${results.length}`],
+                          ['ok', `成功 ${okCount}`],
+                          ['fail', `失败 ${failCount}`],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <button
+                          key={key}
+                          onClick={() => setStatusFilter(key)}
+                          title={`只看${label.split(' ')[0]}的请求`}
+                          className={`rounded px-2 py-0.5 text-[11px] transition cursor-pointer ${
+                            statusFilter === key
+                              ? 'bg-brand/30 text-brand-light'
+                              : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <Search
+                        size={12}
+                        className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
+                      />
+                      <input
+                        value={resultKw}
+                        onChange={(e) => setResultKw(e.target.value)}
+                        placeholder="搜索结果（参数/状态码/响应）"
+                        className="w-48 rounded-md border border-slate-700/50 bg-slate-800/40 py-1 pl-7 pr-2 text-[11px] text-slate-200 outline-none focus:border-brand/60"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="overflow-x-auto rounded-lg border border-slate-700/40">
+
+              {!resultCollapsed && (
+              <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-700/40">
                 <table className="w-full text-[11.5px]">
                   <thead>
-                    <tr className="border-b border-slate-700/50 text-slate-400">
+                    <tr className="sticky top-0 z-10 border-b border-slate-700/50 bg-slate-900/95 text-slate-400">
                       <th className="px-2 py-1.5 text-left font-medium">#</th>
                       <th className="px-2 py-1.5 text-left font-medium">发送时间</th>
                       <th className="px-2 py-1.5 text-left font-medium">状态</th>
@@ -829,35 +1260,20 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.map((r) => {
-                      const b = statusBadge(r);
-                      return (
-                        <tr
-                          key={r.index}
-                          className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
-                        >
-                          <td className="px-2 py-1.5 text-slate-400">{r.index + 1}</td>
-                          <td className="whitespace-nowrap px-2 py-1.5 text-slate-400" title={new Date(r.sentAt).toLocaleString()}>
-                            {relTime(r.sentAt)}
-                          </td>
-                          <td className="px-2 py-1.5">
-                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${b.cls}`}>
-                              {b.text}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-right text-slate-400">{r.durationMs}ms</td>
-                          <td className="max-w-[180px] truncate px-2 py-1.5 text-slate-400">
-                            {variables.map((v) => `${v}=${r.vars[v] ?? ''}`).join(' ')}
-                          </td>
-                          <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400">
-                            {r.error ?? r.body?.slice(0, 120) ?? '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    <ResultTable results={visibleResults} variables={variables} />
+                    {visibleResults.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-4 text-center text-slate-500">
+                          {running && !stopped
+                            ? '执行中，等待请求返回…'
+                            : '没有符合当前筛选条件的结果'}
+                        </td>
+                      </tr>
+                    )}
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           )}
           </div>
@@ -987,6 +1403,111 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     </>
   );
 }
+
+/* ── 性能优化：参数行 / 结果表拆分为行级 memo 组件 ──
+ * 每个单元格都是受控 input，输入一个字符原本会触发整页重渲染、几百个输入框全部 reconciliation，
+ * 表现为输入卡顿。拆成行级 memo 后，只有被编辑的那一行会重渲染，其余行直接跳过；
+ * 结果表独立 memo，改参数时（父组件重渲染）不再跟着重渲染。 */
+
+interface ParamRowProps {
+  ri: number;
+  r: BatchRow;
+  variables: string[];
+  onChange: (ri: number, key: string, val: string) => void;
+  onRemove: (ri: number) => void;
+}
+
+const ParamRow = memo(function ParamRow({ ri, r, variables, onChange, onRemove }: ParamRowProps) {
+  return (
+    <tr className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20">
+      <td className="px-2 py-1.5 text-slate-400">{ri + 1}</td>
+      {variables.map((v, i) => (
+        <td key={i} className="px-2 py-1.5">
+          <input
+            value={r[v] ?? ''}
+            onChange={(e) => onChange(ri, v, e.target.value)}
+            className="w-28 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 text-[12px] text-slate-200 outline-none focus:border-brand/60"
+          />
+        </td>
+      ))}
+      <td className="px-2 py-1.5">
+        <button
+          onClick={() => onRemove(ri)}
+          className="text-slate-500 transition hover:text-rose-400 cursor-pointer"
+        >
+          <Trash2 size={13} />
+        </button>
+      </td>
+    </tr>
+  );
+});
+
+const ParamRows = memo(function ParamRows({
+  rows,
+  variables,
+  onChange,
+  onRemove,
+}: {
+  rows: { r: BatchRow; ri: number }[];
+  variables: string[];
+  onChange: (ri: number, key: string, val: string) => void;
+  onRemove: (ri: number) => void;
+}) {
+  return (
+    <>
+      {rows.map(({ r, ri }) => (
+        <ParamRow
+          key={ri}
+          ri={ri}
+          r={r}
+          variables={variables}
+          onChange={onChange}
+          onRemove={onRemove}
+        />
+      ))}
+    </>
+  );
+});
+
+const ResultTable = memo(function ResultTable({
+  results,
+  variables,
+}: {
+  results: BatchCallResult[];
+  variables: string[];
+}) {
+  return (
+    <>
+      {results.map((r) => {
+        const b = makeStatusBadge(r);
+        return (
+          <tr
+            key={r.index}
+            className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
+          >
+            <td className="px-2 py-1.5 text-slate-400">{r.index + 1}</td>
+            <td
+              className="whitespace-nowrap px-2 py-1.5 text-slate-400"
+              title={new Date(r.sentAt).toLocaleString()}
+            >
+              {relTime(r.sentAt)}
+            </td>
+            <td className="px-2 py-1.5">
+              <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${b.cls}`}>{b.text}</span>
+            </td>
+            <td className="px-2 py-1.5 text-right text-slate-400">{r.durationMs}ms</td>
+            <td className="max-w-[180px] truncate px-2 py-1.5 text-slate-400">
+              {variables.map((v) => `${v}=${r.vars[v] ?? ''}`).join(' ')}
+            </td>
+            <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400">
+              {r.error ?? r.body?.slice(0, 120) ?? '-'}
+            </td>
+          </tr>
+        );
+      })}
+    </>
+  );
+});
 
 function KVEditorInline({
   value,

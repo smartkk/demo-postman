@@ -3,6 +3,8 @@ import type {
   AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
+  BatchProgress,
+  BatchProgressState,
   BatchProject,
   CaptureInput,
   CaptureSettings,
@@ -47,8 +49,8 @@ const api = {
     ipcRenderer.invoke('request:send', id, input),
   cancelRequest: (id: string): Promise<void> =>
     ipcRenderer.invoke('request:cancel', id),
-  batchSend: (input: BatchCallInput): Promise<BatchCallResult[]> =>
-    ipcRenderer.invoke('request:batchSend', input),
+  batchSend: (input: BatchCallInput, runId: string): Promise<BatchCallResult[]> =>
+    ipcRenderer.invoke('request:batchSend', input, runId),
   listBatches: (): Promise<BatchProject[]> =>
     ipcRenderer.invoke('batch:list'),
   saveBatch: (project: BatchProject): Promise<BatchProject> =>
@@ -59,8 +61,14 @@ const api = {
     ipcRenderer.invoke('batch:rename', id, name),
   moveBatchFolder: (id: string, folder: string): Promise<void> =>
     ipcRenderer.invoke('batch:moveFolder', id, folder),
-  runBatch: (id: string): Promise<BatchCallResult[]> =>
-    ipcRenderer.invoke('batch:run', id),
+  runBatch: (id: string, runId: string, skipIndexes?: number[]): Promise<BatchCallResult[]> =>
+    ipcRenderer.invoke('batch:run', id, runId, skipIndexes),
+  /** 中断一次批量执行（暂停）：返回是否命中正在执行的批次。 */
+  cancelBatch: (runId: string): Promise<boolean> =>
+    ipcRenderer.invoke('batch:cancel', runId),
+  /** 保存/清除断点续跑进度（progress 传 null 表示清除）。 */
+  saveBatchProgress: (id: string, progress: BatchProgressState | null): Promise<void> =>
+    ipcRenderer.invoke('batch:progress', id, progress),
   listBatchFolders: (): Promise<string[]> =>
     ipcRenderer.invoke('batch:folders'),
   createBatchFolder: (name: string): Promise<void> =>
@@ -100,6 +108,12 @@ const api = {
       cb(list, folders);
     ipcRenderer.on('batch:updated', handler);
     return () => ipcRenderer.removeListener('batch:updated', handler);
+  },
+  /** 订阅批量执行进度：每完成一条请求推送一次。 */
+  onBatchProgress: (cb: (p: BatchProgress) => void): (() => void) => {
+    const handler = (_e: unknown, p: BatchProgress) => cb(p);
+    ipcRenderer.on('batch:progress', handler);
+    return () => ipcRenderer.removeListener('batch:progress', handler);
   },
   exportCollection: (): Promise<unknown> =>
     ipcRenderer.invoke('collection:export'),

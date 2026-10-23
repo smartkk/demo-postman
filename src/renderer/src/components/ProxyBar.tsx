@@ -36,7 +36,7 @@ export function ProxyBar({
   };
 
   return (
-    <header className="glass flex h-12 shrink-0 items-center gap-2 px-3 sm:px-4">
+    <header className="glass flex h-12 shrink-0 items-center gap-2 px-3 sm:px-4" data-select-scope>
       <div className="flex shrink-0 items-center gap-2">
         <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-brand to-brand-light shadow-lg shadow-brand/30">
           <Server size={16} className="text-white" />
@@ -132,6 +132,7 @@ export function ProxyBar({
 
       {caOpen && (
         <div
+          data-select-scope
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
           onClick={() => setCaOpen(false)}
         >

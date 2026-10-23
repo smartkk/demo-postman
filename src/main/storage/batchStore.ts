@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { FolderManager } from './folderManager';
 import { atomicWriteJson } from './atomicWrite';
-import type { BatchProject } from '../../shared/types';
+import type { BatchProgressState, BatchProject } from '../../shared/types';
 
 interface PersistShape {
   version: 1;
@@ -129,6 +129,25 @@ export class BatchStore {
     p.results = results;
     p.lastRunAt = lastRunAt;
     p.updatedAt = lastRunAt;
+    this.scheduleSave();
+    this.emitChange();
+  }
+
+  /**
+   * 记录断点续跑进度（已完成的行号与结果）。
+   * 全部行完成时清除断点，避免下次运行误判为「未跑完」。
+   */
+  recordProgress(id: string, progress: BatchProgressState | null): void {
+    const p = this.projects.get(id);
+    if (!p) return;
+    const total = p.rows?.length ?? 0;
+    const doneCount = progress?.doneIndexes.length ?? 0;
+    if (!progress || total === 0 || doneCount >= total) {
+      delete p.progress;
+    } else {
+      p.progress = progress;
+    }
+    p.updatedAt = new Date().toISOString();
     this.scheduleSave();
     this.emitChange();
   }

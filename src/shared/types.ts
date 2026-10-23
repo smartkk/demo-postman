@@ -164,6 +164,21 @@ export interface BatchCallResult {
   at: string;
 }
 
+/**
+ * 批量执行的进度事件：每完成一条请求就推一条，
+ * 使界面可以「边执行边出结果」，无需等待整批结束。
+ */
+export interface BatchProgress {
+  /** 本次执行的唯一标识（渲染进程生成，用于丢弃过期事件）。 */
+  runId: string;
+  /** 刚完成的那一条结果。 */
+  result: BatchCallResult;
+  /** 已完成条数（含本条）。 */
+  done: number;
+  /** 总条数。 */
+  total: number;
+}
+
 /** 批量调用请求体：基础请求模板 + 变量名列表 + 每行变量值。 */
 export interface BatchCallInput {
   method: string;
@@ -181,6 +196,11 @@ export interface BatchCallInput {
    * （按文件名顺序、每个文件一行，filesToRows 规则），忽略 rows。
    */
   paramFolder?: string;
+  /**
+   * 断点续跑：本次跳过的原始行号（这些行在上一轮已执行完成）。
+   * 缺省表示全量执行；结果中的 index 始终是原始行号。
+   */
+  skipIndexes?: number[];
 }
 
 /** 持久化的批量调用任务（「项目」）：可保存、按文件夹分组，关闭弹窗不丢失。 */
@@ -204,6 +224,26 @@ export interface BatchProject {
   paramFolder?: string;
   lastRunAt?: string; // 最近一次运行时间
   results?: BatchCallResult[]; // 最近一次运行结果（可选持久化）
+  /** 来源历史接口 id（可选）：记录该批量任务基于哪个已捕获接口创建，便于回溯与重新导入。 */
+  sourceInterfaceId?: string;
+  /**
+   * 断点续跑进度（可选，已持久化）：已完成请求的原始行号 + 其结果。
+   * 保存后可跨会话、甚至跨应用重启继续执行剩余行。
+   * rowsSignature 用于校验参数行是否被改动，改动后断点自动失效。
+   */
+  progress?: BatchProgressState;
+}
+
+/** 批量任务的断点续跑状态。 */
+export interface BatchProgressState {
+  /** 已完成的原始行号。 */
+  doneIndexes: number[];
+  /** 已完成行的结果（与 doneIndexes 一一对应，按行号保序）。 */
+  results: BatchCallResult[];
+  /** 生成该断点时的参数行内容签名；与当前 rows 不一致时断点失效。 */
+  rowsSignature: string;
+  /** 最近一次运行时间（ISO）。 */
+  updatedAt: string;
 }
 
 /* ───────────────────────────────────────────────────────────

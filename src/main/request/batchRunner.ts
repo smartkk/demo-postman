@@ -130,13 +130,38 @@ export function completeRowVars(
 }
 
 /**
+ * 批量调用的可中断 / 流式执行选项。
+ */
+export interface BatchRunOptions {
+  /** 中断信号：abort 后不再调度后续请求，并中断在途请求。 */
+  signal?: AbortSignal;
+  /** 每完成一条请求回调一次（用于界面边执行边出结果）。 */
+  onResult?: (result: BatchCallResult, done: number, total: number) => void;
+}
+
+/**
  * 批量调用：同一基础请求，按每行变量值替换后逐个/并发发送，返回每行的发送时间 + 结果。
+ *
  * @param env 当前激活环境的环境变量（可选），先替换进基础模板，再按行替换。
+ * @param options 中断信号与流式回调。被中断的请求不计入结果（它们本就没有响应）。
  */
 export async function runBatchCall(
   input: BatchCallInput,
-  env?: Record<string, string>
+  env?: Record<string, string>,
+  options: BatchRunOptions = {}
 ): Promise<BatchCallResult[]> {
+  const { signal, onResult } = options;
+  const rows = input.rows || [];
+  // 断点续跑：跳过上一轮已执行完的行，pending 里保留其真实行号
+  const skip = new Set(input.skipIndexes ?? []);
+  const pending = rows
+    .map((row, i) => ({ row, i }))
+    .filter(({ i }) => !skip.has(i));
+  const total = pending.length;
+  let done = 0;
+  const out: BatchCallResult[] = [];
+  const aborted = () => signal?.aborted === true;
+
   // 先对环境变量做一次性替换（基础模板可引用环境）；动态变量留到每行执行时独立生成
   const base: CaptureInput = {
     method: input.method,
@@ -150,7 +175,7 @@ export async function runBatchCall(
   const runOne = async (
     row: Record<string, string>,
     index: number
-  ): Promise<BatchCallResult> => {
+  ): Promise<BatchCallResult | null> => {
     const sentAt = new Date().toISOString();
     // 先解析参数行单元格值里的动态变量（如 {{$uuid}}、{{$timestamp}}），每行独立生成；
     // 模板声明过但该行缺失的变量补空串（文件夹模式下不同文件的键集可能不同）
@@ -160,7 +185,7 @@ export async function runBatchCall(
     const request = resolvePlaceholders(baseResolved, resolvedRow);
     try {
       // 批量是无人值守场景，必须带超时，否则服务不可达时会堆积永不释放的连接
-      const resp = await sendRequest(request, 0, undefined, AUTO_TIMEOUT_MS);
+      const resp = await sendRequest(request, 0, signal, AUTO_TIMEOUT_MS);
       return {
         index,
         vars: resolvedRow,
@@ -173,6 +198,8 @@ export async function runBatchCall(
         at: resp.at,
       };
     } catch (err) {
+      // 被用户中断：这条请求没有产生响应，不计入结果，也不推送进度
+      if (aborted()) return null;
       return {
         index,
         vars: resolvedRow,
@@ -188,25 +215,34 @@ export async function runBatchCall(
     }
   };
 
-  const rows = input.rows || [];
+  /** 收集一条结果：按下标保序去重，并即时推送进度。 */
+  const collect = (r: BatchCallResult | null): boolean => {
+    if (!r) return false;
+    out.push(r);
+    done += 1;
+    onResult?.(r, done, total);
+    return true;
+  };
+
   if (input.sequential) {
-    const out: BatchCallResult[] = [];
-    for (let i = 0; i < rows.length; i++) out.push(await runOne(rows[i], i));
-    return out;
+    for (const { row, i } of pending) {
+      if (aborted()) break;
+      collect(await runOne(row, i));
+    }
+    return out.sort((a, b) => a.index - b.index);
   }
-  // 并发模式：限制同时发送的请求数（结果仍按下标保序），
-  // 避免海量行瞬间建立大量 socket 导致内存/连接耗尽。
-  const out: BatchCallResult[] = new Array(rows.length);
+
+  // 并发模式：限制同时发送的请求数，避免海量行瞬间建立大量 socket 导致内存/连接耗尽。
   let next = 0;
   const workers = Array.from(
-    { length: Math.min(BATCH_CONCURRENCY, rows.length) },
+    { length: Math.min(BATCH_CONCURRENCY, pending.length) },
     async () => {
-      while (next < rows.length) {
-        const i = next++;
-        out[i] = await runOne(rows[i], i);
+      while (!aborted() && next < pending.length) {
+        const { row, i } = pending[next++];
+        collect(await runOne(row, i));
       }
     }
   );
   await Promise.all(workers);
-  return out;
+  return out.sort((a, b) => a.index - b.index);
 }

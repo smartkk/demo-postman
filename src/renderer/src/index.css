@@ -211,6 +211,22 @@ body {
 .theme-light .text-yellow-400 {
   color: #b45309 !important;
 }
+/* 以下为合并本地主题覆盖时补齐的语义色（远程版本未覆盖，浅色下需加深保证可读） */
+.theme-light .text-amber-400\/90 {
+  color: #b45309 !important;
+}
+.theme-light .text-emerald-400 {
+  color: #047857 !important;
+}
+.theme-light .text-sky-400 {
+  color: #0369a1 !important;
+}
+.theme-light .text-purple-300 {
+  color: #7c3aed !important;
+}
+.theme-light .text-purple-400 {
+  color: #6d28d9 !important;
+}
 
 /* ── 语义色背景 ── */
 .theme-light .bg-emerald-500\/15 {

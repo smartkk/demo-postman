@@ -25,7 +25,7 @@ export class ErrorBoundary extends Component<Props, State> {
   render(): ReactNode {
     if (this.state.error) {
       return (
-        <div className="p-6 text-[13px] text-rose-300">
+        <div className="p-6 text-[13px] text-rose-300" data-select-scope>
           <p className="font-semibold">界面渲染出错</p>
           <pre className="mt-2 max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-slate-800/60 p-3 text-[11px] text-slate-400">
             {this.state.error.message}

@@ -2,6 +2,8 @@ import type {
   AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
+  BatchProgress,
+  BatchProgressState,
   BatchProject,
   CaptureInput,
   CaptureSettings,
@@ -41,8 +43,8 @@ export const api = {
   sendRequest: (id: string, input: CaptureInput): Promise<ResponseRecord | null> =>
     window.api.sendRequest(id, input),
   cancelRequest: (id: string): Promise<void> => window.api.cancelRequest(id),
-  batchSend: (input: BatchCallInput): Promise<BatchCallResult[]> =>
-    window.api.batchSend(input),
+  batchSend: (input: BatchCallInput, runId: string): Promise<BatchCallResult[]> =>
+    window.api.batchSend(input, runId),
   listBatches: (): Promise<BatchProject[]> => window.api.listBatches(),
   saveBatch: (project: BatchProject): Promise<BatchProject> =>
     window.api.saveBatch(project),
@@ -51,7 +53,13 @@ export const api = {
     window.api.renameBatch(id, name),
   moveBatchFolder: (id: string, folder: string): Promise<void> =>
     window.api.moveBatchFolder(id, folder),
-  runBatch: (id: string): Promise<BatchCallResult[]> => window.api.runBatch(id),
+  runBatch: (id: string, runId: string, skipIndexes?: number[]): Promise<BatchCallResult[]> =>
+    window.api.runBatch(id, runId, skipIndexes),
+  /** 中断一次批量执行（暂停）。 */
+  cancelBatch: (runId: string): Promise<boolean> => window.api.cancelBatch(runId),
+  /** 保存/清除断点续跑进度。 */
+  saveBatchProgress: (id: string, progress: BatchProgressState | null): Promise<void> =>
+    window.api.saveBatchProgress(id, progress),
   listBatchFolders: (): Promise<string[]> => window.api.listBatchFolders(),
   createBatchFolder: (name: string): Promise<void> =>
     window.api.createBatchFolder(name),
@@ -126,6 +134,8 @@ export const api = {
   onBatches: (
     cb: (list: BatchProject[], folders: string[]) => void
   ) => window.api.onBatches(cb),
+  /** 订阅批量执行进度（每完成一条推送一次）。 */
+  onBatchProgress: (cb: (p: BatchProgress) => void) => window.api.onBatchProgress(cb),
   onChains: (
     cb: (list: ChainProject[], folders: string[]) => void
   ) => window.api.onChains(cb),
@@ -149,13 +159,15 @@ declare global {
       deleteFolder: (name: string) => Promise<void>;
       sendRequest: (id: string, input: CaptureInput) => Promise<ResponseRecord | null>;
       cancelRequest: (id: string) => Promise<void>;
-      batchSend: (input: BatchCallInput) => Promise<BatchCallResult[]>;
+      batchSend: (input: BatchCallInput, runId: string) => Promise<BatchCallResult[]>;
       listBatches: () => Promise<BatchProject[]>;
       saveBatch: (project: BatchProject) => Promise<BatchProject>;
       deleteBatch: (id: string) => Promise<boolean>;
       renameBatch: (id: string, name: string) => Promise<void>;
       moveBatchFolder: (id: string, folder: string) => Promise<void>;
-      runBatch: (id: string) => Promise<BatchCallResult[]>;
+      runBatch: (id: string, runId: string, skipIndexes?: number[]) => Promise<BatchCallResult[]>;
+      cancelBatch: (runId: string) => Promise<boolean>;
+      saveBatchProgress: (id: string, progress: BatchProgressState | null) => Promise<void>;
       listBatchFolders: () => Promise<string[]>;
       createBatchFolder: (name: string) => Promise<void>;
       deleteBatchFolder: (name: string) => Promise<void>;
@@ -194,6 +206,7 @@ declare global {
       runSchedule: (id: string) => Promise<ScheduleRunResult | null>;
       onSchedules: (cb: (list: ScheduleConfig[]) => void) => () => void;
       onBatches: (cb: (list: BatchProject[], folders: string[]) => void) => () => void;
+      onBatchProgress: (cb: (p: BatchProgress) => void) => () => void;
       /* ── 链式请求 ── */
       listChains: () => Promise<ChainProject[]>;
       saveChain: (project: ChainProject) => Promise<ChainProject>;

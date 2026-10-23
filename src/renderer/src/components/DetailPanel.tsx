@@ -244,7 +244,7 @@ export function DetailPanel({ record, store }: Props) {
   ];
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col bg-[#0F172A]">
+    <main className="flex min-w-0 flex-1 flex-col bg-[#0F172A]" data-select-scope>
       <div className="border-b border-slate-700/40 px-5 py-4">
         <div className="space-y-2">
           <div className="flex items-center gap-2.5">
@@ -582,7 +582,7 @@ function ParamsView({ record }: { record: InterfaceRecord }) {
     );
   }
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700/40">
+    <div className="overflow-hidden rounded-lg border border-slate-700/40" data-select-block>
       {rows.map((r, i) => (
         <div
           key={i}

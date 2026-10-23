@@ -107,7 +107,7 @@ interface TreeProps {
 
 export function JsonTree({ data, defaultExpandDepth = 2, expandAll = false }: TreeProps) {
   return (
-    <div className="json-tree">
+    <div className="json-tree" data-select-block>
       <JsonNode
         value={data}
         depth={0}

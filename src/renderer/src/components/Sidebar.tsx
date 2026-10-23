@@ -266,7 +266,7 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
   };
 
   return (
-    <aside className="glass flex h-full w-full flex-col">
+    <aside className="glass flex h-full w-full flex-col" data-select-scope>
       {/* ── 视图导航 ── */}
       <div className="flex shrink-0 gap-1 border-b border-slate-700/40 px-2.5 py-2">
         {NAV_ITEMS.map((it) => {

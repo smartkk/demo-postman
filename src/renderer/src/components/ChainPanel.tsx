@@ -321,7 +321,7 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   const cur = steps[activeStep];
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col" data-select-scope>
       {/* 编辑区 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <div className="mb-4 flex items-center justify-between">

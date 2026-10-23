@@ -27,3 +27,4 @@ out_s.txt
 # GUI 测试运行时数据（脚本与截图入库，应用数据/打点不入库）
 gui-test-artifacts/electron-data/
 gui-test-artifacts/hits.json
+_select_scope_test.html

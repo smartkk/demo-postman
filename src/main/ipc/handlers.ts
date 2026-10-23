@@ -12,6 +12,7 @@ import type {
   AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
+  BatchProgressState,
   BatchProject,
   BatchRow,
   CaptureInput,
@@ -89,6 +90,9 @@ export function resolveParamFolder(paramFolder: string): {
 
 /** 在途请求的中断控制器（按接口 id 索引），用于「取消发送」。 */
 const inFlight = new Map<string, AbortController>();
+
+/** 在途批量执行的中断控制器（按 runId 索引），用于「暂停」。 */
+const batchRuns = new Map<string, AbortController>();
 
 /**
  * 链式请求运行：按步骤顺序逐个发送 HTTP 请求，
@@ -296,11 +300,11 @@ export function registerIpc(
   });
   ipcMain.handle(
     'request:batchSend',
-    (_e, input: BatchCallInput): Promise<BatchCallResult[]> => {
+    async (_e, input: BatchCallInput, runId: string): Promise<BatchCallResult[]> => {
+      // 参数文件夹模式：执行时实时读取文件作为参数行
       const effective =
         input.paramFolder && input.paramFolder.trim()
           ? (() => {
-              // 参数文件夹模式：执行时实时读取文件作为参数行
               const resolved = resolveParamFolder(input.paramFolder);
               if (!resolved.rows.length) {
                 throw new Error(`参数文件夹中没有可读取的文件：${input.paramFolder}`);
@@ -308,12 +312,31 @@ export function registerIpc(
               return { ...input, variables: resolved.variables, rows: resolved.rows };
             })()
           : input;
-      return runBatchCall(
-        effective,
-        settings.get().environments?.[settings.get().activeEnv || '']
-      );
+      const controller = new AbortController();
+      if (runId) batchRuns.set(runId, controller);
+      try {
+        return await runBatchCall(
+          effective,
+          settings.get().environments?.[settings.get().activeEnv || ''],
+          {
+            signal: controller.signal,
+            onResult: (result, done, total) =>
+              getWin()?.webContents.send('batch:progress', { runId, result, done, total }),
+          }
+        );
+      } finally {
+        if (runId) batchRuns.delete(runId);
+      }
     }
   );
+
+  /** 中断一次批量执行：停止调度后续请求，并中断在途请求。 */
+  ipcMain.handle('batch:cancel', (_e, runId: string): boolean => {
+    const c = batchRuns.get(runId);
+    if (!c) return false;
+    c.abort();
+    return true;
+  });
 
   // ── 批量调用任务（可持久化保存，按文件夹分组） ──
   if (batchStore) {
@@ -335,7 +358,12 @@ export function registerIpc(
     );
     ipcMain.handle(
       'batch:run',
-      async (_e, id: string): Promise<BatchCallResult[]> => {
+      async (
+        _e,
+        id: string,
+        runId: string,
+        skipIndexes?: number[]
+      ): Promise<BatchCallResult[]> => {
         const p = batchStore!.get(id);
         if (!p) throw new Error('批量任务不存在');
         // 绑定了参数文件夹时，执行时实时读取文件作为参数行
@@ -349,22 +377,39 @@ export function registerIpc(
           variables = resolved.variables;
           rows = resolved.rows;
         }
-        const results = await runBatchCall(
-          {
-            method: p.method,
-            url: p.url,
-            headers: p.headers,
-            body: p.body,
-            variables,
-            rows,
-            sequential: p.sequential,
-          },
-          settings.get().environments?.[settings.get().activeEnv || '']
-        );
-        batchStore!.recordRun(id, results, new Date().toISOString());
-        return results;
+        const controller = new AbortController();
+        if (runId) batchRuns.set(runId, controller);
+        try {
+          const results = await runBatchCall(
+            {
+              method: p.method,
+              url: p.url,
+              headers: p.headers,
+              body: p.body,
+              variables,
+              rows,
+              sequential: p.sequential,
+              skipIndexes,
+            },
+            settings.get().environments?.[settings.get().activeEnv || ''],
+            {
+              signal: controller.signal,
+              onResult: (result, done, total) =>
+                getWin()?.webContents.send('batch:progress', { runId, result, done, total }),
+            }
+          );
+          batchStore!.recordRun(id, results, new Date().toISOString());
+          return results;
+        } finally {
+          if (runId) batchRuns.delete(runId);
+        }
       }
     );
+    /** 保存/清除断点续跑进度（progress 为 null 表示清除）。 */
+    ipcMain.handle('batch:progress', (_e, id: string, progress: BatchProgressState | null): void => {
+      batchStore!.recordProgress(id, progress);
+    });
+
     ipcMain.handle('batch:folders', (): string[] => batchStore!.listFolders());
     ipcMain.handle('batch:createFolder', (_e, name: string): void =>
       batchStore!.createFolder(name)

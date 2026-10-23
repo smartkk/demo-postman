@@ -161,6 +161,7 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
 
   return (
     <div
+      data-select-scope
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
       onClick={onClose}
     >

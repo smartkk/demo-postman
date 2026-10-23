@@ -11,6 +11,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { api } from './api/client';
 import { useInterfaces } from './store/useInterfaces';
 import { ToastHost, installGlobalErrorToast } from './components/ui/Toast';
+import { installSelectScope } from './lib/select';
 import type {
   CaptureSettings,
   ExtensionStatus,
@@ -123,6 +124,9 @@ export default function App() {
     document.addEventListener('copy', onCopy);
     return () => document.removeEventListener('copy', onCopy);
   }, []);
+
+  // Ctrl/Cmd+A 只选中鼠标所在面板的内容，避免整页全选
+  useEffect(() => installSelectScope(), []);
 
   const toggleProxy = async () => {
     const s = await api.toggleProxy();

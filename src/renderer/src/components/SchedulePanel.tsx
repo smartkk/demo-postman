@@ -240,7 +240,7 @@ export function SchedulePanel({ records, activeId, onSelect }: Props) {
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col">
+    <div className="flex h-full min-w-0 flex-1 flex-col" data-select-scope>
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5">
 
         {/* 新建/编辑表单（由左侧栏 + 触发 activeId=null 进入新建） */}

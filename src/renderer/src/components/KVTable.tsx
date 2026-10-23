@@ -7,7 +7,7 @@ export function KVTable({ data }: Props) {
   if (entries.length === 0)
     return <div className="py-8 text-center text-[12px] text-slate-600">无数据</div>;
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-700/40">
+    <div className="overflow-hidden rounded-lg border border-slate-700/40" data-select-block>
       {entries.map(([k, v], i) => (
         <div
           key={k}

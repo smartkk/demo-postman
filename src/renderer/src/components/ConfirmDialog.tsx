@@ -24,6 +24,7 @@ export function ConfirmDialog({
   if (!open) return null;
   return (
     <div
+      data-select-scope
       className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm animate-fade-in"
       onClick={onCancel}
     >
