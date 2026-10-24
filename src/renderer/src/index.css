@@ -55,14 +55,33 @@ body {
   border-color: rgba(100, 116, 139, 0.2);
 }
 
-/* ── 根背景 ── */
-.theme-light .bg-\[#0F172A\] {
+/* ── 根背景 ──
+   注意：`#` 在选择器里必须转义为 \#，否则整个规则会被解析为
+   「类 bg-[ + ID 选择器」，永远匹配不上（浅色主题残留的根因） */
+.theme-light .bg-\[\#0F172A\] {
   background-color: #f1f5f9 !important;
 }
 
 /* ── 表面层 bg-slate（深→浅） ── */
 .theme-light .bg-slate-900\/60 {
   background-color: #ffffff !important;
+}
+/* 浮层面板（日期选择、引入本地请求搜索框） */
+.theme-light .bg-slate-900\/95 {
+  background-color: #ffffff !important;
+}
+/* 链式步骤的代码块 / 响应预览 */
+.theme-light .bg-slate-900\/50 {
+  background-color: #f1f5f9 !important;
+}
+/* 链式结果容器、定时任务展开的历史详情行 */
+.theme-light .bg-slate-900\/40,
+.theme-light .bg-slate-900\/30 {
+  background-color: #f8fafc !important;
+}
+/* 粘性表头 / Toast（需不透明才能遮挡滚动内容） */
+.theme-light .bg-slate-800\/95 {
+  background-color: #f1f5f9 !important;
 }
 .theme-light .bg-slate-800\/20 {
   background-color: #fafbfc !important;
@@ -127,6 +146,10 @@ body {
   border-color: #e2e8f0 !important;
 }
 .theme-light .border-slate-600 {
+  border-color: #94a3b8 !important;
+}
+.theme-light .border-slate-600\/60,
+.theme-light .border-slate-500 {
   border-color: #94a3b8 !important;
 }
 
@@ -255,6 +278,9 @@ body {
   background-color: #edf0f4 !important;
 }
 .theme-light .hover\:bg-slate-700\/30:hover {
+  background-color: #e2e8f0 !important;
+}
+.theme-light .hover\:bg-slate-700\/40:hover {
   background-color: #e2e8f0 !important;
 }
 .theme-light .hover\:bg-slate-700\/50:hover {

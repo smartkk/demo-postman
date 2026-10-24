@@ -23,6 +23,8 @@ import type {
 interface Props {
   records: InterfaceRecord[];
   activeId: string | null;
+  /** 新建完成后同步左侧栏选中态（App 的 activeIds.schedules） */
+  onSelect?: (id: string) => void;
 }
 
 const DEFAULT_INTERVALS = [
@@ -52,7 +54,7 @@ function recordToInput(r: InterfaceRecord): CaptureInput {
   };
 }
 
-export function SchedulePanel({ records, activeId }: Props) {
+export function SchedulePanel({ records, activeId, onSelect }: Props) {
   const [schedules, setSchedules] = useState<ScheduleConfig[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -130,15 +132,11 @@ export function SchedulePanel({ records, activeId }: Props) {
       // 编辑模式：保留表单，便于继续微调
       setShowAdd(true);
     } else {
-      // 新建模式：清空并收起表单
-      setName('');
-      setSelectedRecId('');
-      setIntervalSec(60);
-      setStartAt('');
-      setChainId('');
-      setMode('single');
-      setShowAdd(false);
-      setEditingId(null);
+      // 新建完成：直接选中该任务，让用户立即看到概要与执行历史，
+      // 不再收起表单后留下空白主区。onSelect 同步左侧栏高亮；
+      // activeId 变化会再次触发 editSchedule（幂等，仅重复读一次列表）
+      onSelect?.(config.id);
+      await editSchedule(config.id);
     }
   };
 

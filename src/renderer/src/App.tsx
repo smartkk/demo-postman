@@ -165,6 +165,7 @@ export default function App() {
           <SchedulePanel
             records={store.list}
             activeId={activeIds.schedules ?? null}
+            onSelect={(id) => handleSelect('schedules', id)}
           />
         )}
         {view === 'batches' && (
