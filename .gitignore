@@ -23,3 +23,7 @@ _tsc.txt
 build_err.txt
 err_s.txt
 out_s.txt
+
+# GUI 测试运行时数据（脚本与截图入库，应用数据/打点不入库）
+gui-test-artifacts/electron-data/
+gui-test-artifacts/hits.json

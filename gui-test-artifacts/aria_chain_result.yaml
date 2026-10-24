@@ -1,0 +1,156 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - text: 链式任务
+  - button "新建空白任务":
+    - img
+  - textbox "新文件夹名"
+  - button "新建文件夹":
+    - img
+  - text: 未命名链式任务 2 步
+  - button "删除":
+    - img
+  - text: 未命名链式任务 2 步
+  - button "删除":
+    - img
+- textbox: 未命名链式任务
+- combobox:
+  - option "未分组" [selected]
+- img
+- button "保存":
+  - img
+  - text: 保存
+- button:
+  - img
+- paragraph:
+  - text: 把多个接口按顺序串成一个工作流。每一步可从响应中
+  - code: "{提取}"
+  - text: 字段，供后续步骤以
+  - code: "{{步骤名.字段名}}"
+  - text: 引用（例如
+  - code: "{{login.token}}"
+  - text: ）。 也可使用动态变量
+  - code: "{{$timestamp}}"
+  - text: 等。任一步失败即中断后续。
+- text: 步骤（按顺序排列 = 调用顺序）
+- button "引入本地请求":
+  - img
+  - text: 引入本地请求
+- button "步骤":
+  - img
+  - text: 步骤
+- text: 1 login GET http://127.0.0.1:8765/api/hello
+- button "上移" [disabled]:
+  - img
+- button "下移":
+  - img
+- button "删除步骤":
+  - img
+- text: 2 echo POST http://127.0.0.1:8765/api/echo
+- button "上移":
+  - img
+- button "下移" [disabled]:
+  - img
+- button "删除步骤":
+  - img
+- textbox "步骤名（引用键，如 login）": login
+- combobox:
+  - option "GET" [selected]
+  - option "POST"
+  - option "PUT"
+  - option "DELETE"
+  - option "PATCH"
+  - option "HEAD"
+  - option "OPTIONS"
+- img
+- textbox "https://api.example.com/login": http://127.0.0.1:8765/api/hello
+- text: "Headers（值可含 {{步骤名.字段}} / {{$var}}）"
+- button "添加 Header":
+  - img
+  - text: 添加 Header
+- text: Body（可含占位符）
+- 'textbox "{ \"user\": \"{{$uuid}}\" }"':
+  - /placeholder: "{\n  \"user\": \"{{$uuid}}\"\n}"
+- text: 从响应提取（输出变量 → JSON 路径，如
+- code: token
+- text: →
+- code: data.token
+- text: ，或数组项
+- code: firstId
+- text: →
+- code: page.data.records[0].id
+- text: ）
+- textbox "输出变量名": token
+- text: →
+- textbox "JSON 路径，如 data.token 或 page.data.records[0].id": token
+- button:
+  - img
+- text: 提取后在后续步骤用
+- code: "{{login.变量名}}"
+- text: 引用
+- img
+- text: 提取预览（粘贴示例响应 JSON 实时验证）
+- 'textbox "{ \"page\": { \"data\": { \"records\": [ { \"id\": \"abc\" } ] } } }"':
+  - /placeholder: "{\n  \"page\": { \"data\": { \"records\": [ { \"id\": \"abc\" } ] } }\n}"
+- button "添加提取":
+  - img
+  - text: 添加提取
+- button "运行（2 步）":
+  - img
+  - text: 运行（2 步）
+- button "运行已保存":
+  - img
+  - text: 运行已保存
+- text: 执行结果（2/2 步，2 成功 /0 失败）
+- table:
+  - rowgroup:
+    - row "# 步骤 状态 耗时 提取 响应":
+      - columnheader "#"
+      - columnheader "步骤"
+      - columnheader "状态"
+      - columnheader "耗时"
+      - columnheader "提取"
+      - columnheader "响应"
+  - rowgroup:
+    - 'row "1 login 200 2ms token=TKN-9527 {\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":6}查看 ›"':
+      - cell "1"
+      - cell "login"
+      - cell "200"
+      - cell "2ms"
+      - cell "token=TKN-9527"
+      - 'cell "{\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":6}查看 ›"'
+    - 'row "2 echo 200 2ms - {\"echoed\":\"{\\\"t\\\":\\\"TKN-9527\\\"}\",\"receivedAuth\":null,\"receivedContentType\":null}查看 ›"':
+      - cell "2"
+      - cell "echo"
+      - cell "200"
+      - cell "2ms"
+      - cell "-"
+      - 'cell "{\"echoed\":\"{\\\"t\\\":\\\"TKN-9527\\\"}\",\"receivedAuth\":null,\"receivedContentType\":null}查看 ›"'

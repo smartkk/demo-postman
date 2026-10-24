@@ -1,0 +1,83 @@
+{
+  "results": [
+    {
+      "name": "T1_手动录入保存",
+      "status": "PASS",
+      "detail": "侧栏出现接口记录 [服务端命中+0]",
+      "shot": "t_T1_手动录入保存.png"
+    },
+    {
+      "name": "T2_发送请求并查看响应",
+      "status": "PASS",
+      "detail": "响应显示 hello from test server + TKN-9527 [服务端命中+1]",
+      "shot": "t_T2_发送请求并查看响应.png"
+    },
+    {
+      "name": "T3_Query与Header编辑发送",
+      "status": "PASS",
+      "detail": "服务端回显 X-Test=abc123 与 foo=bar [服务端命中+1]",
+      "shot": "t_T3_Query与Header编辑发送.png"
+    },
+    {
+      "name": "T4_cURL导入",
+      "status": "PASS",
+      "detail": "curl 解析回填并保存为接口 [服务端命中+0]",
+      "shot": "t_T4_cURL导入.png"
+    },
+    {
+      "name": "T5_链式请求两步工作流",
+      "status": "PASS",
+      "detail": "链式两步执行成功，步骤2 注入 {{login.token}} [服务端命中+2]",
+      "shot": "t_T5_链式请求两步工作流.png"
+    },
+    {
+      "name": "T6_批量调用模板替换",
+      "status": "PASS",
+      "detail": "批量 2 次执行完成，参数行 id=1,2 [服务端命中+2]",
+      "shot": "t_T6_批量调用模板替换.png"
+    },
+    {
+      "name": "T7_定时任务创建",
+      "status": "PASS",
+      "detail": "定时任务已创建（30 秒间隔，绑定 GET /api/counter） [服务端命中+0]",
+      "shot": "t_T7_定时任务创建.png"
+    },
+    {
+      "name": "T7b_定时任务实际触发",
+      "status": "PASS",
+      "detail": "服务端 /api/counter 被定时调用 10 次 [服务端命中+7]",
+      "shot": "t_T7b_定时任务实际触发.png"
+    },
+    {
+      "name": "T8_代理自动捕获请求",
+      "status": "PASS",
+      "detail": "捕获链路正常，但按界面提示的 127.0.0.1 访问代理失败（Connection refused（IPv4）），[::1] 可用 —— 已记录缺陷 [服务端命中+1]",
+      "shot": "t_T8_代理自动捕获请求.png"
+    },
+    {
+      "name": "T9_错误处理_连接失败",
+      "status": "PASS",
+      "detail": "连接失败在 UI 有错误反馈，应用未崩溃 [服务端命中+0]",
+      "shot": "t_T9_错误处理_连接失败.png"
+    },
+    {
+      "name": "T9b_错误处理_HTTP500",
+      "status": "PASS",
+      "detail": "HTTP 500 状态与错误体正常展示 [服务端命中+1]",
+      "shot": "t_T9b_错误处理_HTTP500.png"
+    },
+    {
+      "name": "T10_设置面板",
+      "status": "PASS",
+      "detail": "设置面板关键项齐全（含 TLS 严格校验开关） [服务端命中+0]",
+      "shot": "t_T10_设置面板.png"
+    },
+    {
+      "name": "T11_主题切换",
+      "status": "PASS",
+      "detail": "明暗主题切换正常（浅色见 t_T11_light.png） [服务端命中+0]",
+      "shot": "t_T11_主题切换.png"
+    }
+  ],
+  "consoleErrors": []
+}

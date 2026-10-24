@@ -1,0 +1,169 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - text: 批量任务
+  - button "新建空白任务":
+    - img
+  - textbox "新文件夹名"
+  - button "新建文件夹":
+    - img
+  - img
+  - heading "暂无批量任务" [level=3]
+  - paragraph: 点击右上角 + 新建，用变量模板与多行数据批量调用同一接口。
+- textbox: 未命名批量任务
+- combobox:
+  - option "未分组" [selected]
+- img
+- button "保存":
+  - img
+  - text: 保存
+- button:
+  - img
+- paragraph:
+  - text: 用一个基础请求模板，通过
+  - code: "{{变量名}}"
+  - text: 占位符区分每次调用的参数。参数行单元格或模板里还可使用动态变量：
+  - code: "{{$timestamp}}"
+  - text: 、
+  - code: "{{$datetime}}"
+  - text: 、
+  - code: "{{$date}}"
+  - text: 、
+  - code: "{{$time}}"
+  - text: 、
+  - code: "{{$uuid}}"
+  - text: （每行不同）、
+  - code: "{{$random(1,100)}}"
+  - text: 。保存后即使关闭本面板也不会丢失。
+- combobox:
+  - option "GET" [selected]
+  - option "POST"
+  - option "PUT"
+  - option "DELETE"
+  - option "PATCH"
+  - option "HEAD"
+  - option "OPTIONS"
+- img
+- 'textbox "https://api.example.com/users/{{id}}"'
+- text: "Headers（值可含 {{var}}）"
+- button "添加 Header":
+  - img
+  - text: 添加 Header
+- text: "Body（可含 {{var}}）"
+- 'textbox "{ \"id\": \"{{id}}\" }"':
+  - /placeholder: "{\n  \"id\": \"{{id}}\"\n}"
+- text: 变量名（占位符）
+- button "变量":
+  - img
+  - text: 变量
+- text: "{{"
+- textbox: id
+- text: "}}"
+- button [disabled]:
+  - img
+- text: 参数行（每行 = 一次调用）
+- img
+- text: 上传 CSV
+- button "粘贴 JSON/CSV":
+  - img
+  - text: 粘贴 JSON/CSV
+- button "行":
+  - img
+  - text: 行
+- table:
+  - rowgroup:
+    - row "# id":
+      - columnheader "#"
+      - columnheader "id"
+      - columnheader
+  - rowgroup:
+    - row "1 1":
+      - cell "1"
+      - cell "1":
+        - textbox: "1"
+      - cell:
+        - button:
+          - img
+    - row "2 2":
+      - cell "2"
+      - cell "2":
+        - textbox: "2"
+      - cell:
+        - button:
+          - img
+- checkbox "串行执行" [checked]
+- text: 串行执行
+- button "运行（2 次）":
+  - img
+  - text: 运行（2 次）
+- heading "抓取设置" [level=2]:
+  - img
+  - text: 抓取设置
+- button:
+  - img
+- img
+- text: 按域名自动分组 浏览器抓取的请求自动归入以「域名」命名的分组（如 api.example.com）。 仅作用于新抓取的记录，已存在的分组不受影响。
+- button "按域名自动分组 浏览器抓取的请求自动归入以「域名」命名的分组（如 api.example.com）。 仅作用于新抓取的记录，已存在的分组不受影响。"
+- img
+- text: 按完整 URL 去重 默认仅按 method+host+path 去重（忽略 query）。开启后，不同 query 参数的同接口会被视为不同接口分别记录。
+- button "按完整 URL 去重 默认仅按 method+host+path 去重（忽略 query）。开启后，不同 query 参数的同接口会被视为不同接口分别记录。"
+- img
+- text: 严格校验 TLS 证书 关闭时接受自签名 / 内网证书（默认，适合调试）；开启后会对 HTTPS 目标做证书校验，自签名证书会被拒绝。
+- button "严格校验 TLS 证书 关闭时接受自签名 / 内网证书（默认，适合调试）；开启后会对 HTTPS 目标做证书校验，自签名证书会被拒绝。"
+- text: 仅捕获这些主机
+- textbox "空 = 不过滤（全部捕获） 例如：api.example.com *.myapp.com":
+  - /placeholder: "空 = 不过滤（全部捕获）\n例如：api.example.com\n*.myapp.com"
+- text: 排除这些主机
+- textbox "例如：analytics.google.com *.adservice.com":
+  - /placeholder: "例如：analytics.google.com\n*.adservice.com"
+- img
+- text: 环境变量
+- button "新增环境":
+  - img
+  - text: 新增环境
+- button "默认"
+- paragraph:
+  - text: 当前环境「默认」变量（KEY=VALUE，可在 URL/Header/Body 中用
+  - code: "{{key}}"
+  - text: 引用）：
+- textbox "baseUrl=https://api.example.com token=xxx":
+  - /placeholder: "baseUrl=https://api.example.com\ntoken=xxx"
+- img
+- text: 文件保存位置
+- paragraph: 接口记录、定时任务与设置将保存在此目录。修改后需重启应用，现有数据会自动迁移到新位置。
+- text: D:\file\github\demo-postman\gui-test-artifacts\electron-data
+- button "选择文件夹"
+- button "恢复默认"
+- button "重启应用"
+- paragraph:
+  - text: 规则同时作用于「代理」与「浏览器插件」两条抓取路径，支持
+  - code: "*.example.com"
+  - text: 通配（匹配任意子域）及精确/子域匹配。修改即时生效。

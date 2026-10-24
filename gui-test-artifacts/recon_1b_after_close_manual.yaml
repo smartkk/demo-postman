@@ -1,0 +1,51 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - img
+  - textbox "搜索接口 / 域名 / 名称…"
+  - text: 共 0 个接口
+  - button "导入集合":
+    - img
+  - button "导出集合":
+    - img
+  - button "新建分组":
+    - img
+  - button "选择管理":
+    - img
+  - button "批量删除":
+    - img
+  - button "筛选器":
+    - img
+  - text: 暂无接口记录 开启代理并访问接口，或点击右上角「手动录入」
+- main:
+  - img
+  - heading "还没有选中的接口" [level=3]
+  - paragraph: 开启顶部「代理」后，将浏览器或系统的 HTTP 代理指向127.0.0.1:8899，经过的请求会被自动记录。同一接口只会保留一条记录，并始终更新为最新参数。

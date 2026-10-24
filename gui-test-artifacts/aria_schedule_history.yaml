@@ -1,0 +1,112 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - text: 定时任务
+  - button "新建定时任务":
+    - img
+  - img
+  - text: gui-健康检查
+  - button "点击启用":
+    - img
+  - button "删除":
+    - img
+  - img
+  - text: 验证-自动选中-586978
+  - button "点击停用":
+    - img
+  - button "删除":
+    - img
+  - img
+  - text: 验证-自动选中-659341
+  - button "点击停用":
+    - img
+  - button "删除":
+    - img
+  - img
+  - text: 验证-自动选中-738232
+  - button "点击停用":
+    - img
+  - button "删除":
+    - img
+  - img
+  - text: gui-健康检查
+  - button "点击停用":
+    - img
+  - button "删除":
+    - img
+- img
+- text: 编辑定时任务 任务名称
+- textbox "如：健康检查 / 每小时同步": gui-健康检查
+- text: 执行类型
+- button "单接口"
+- button "链式任务"
+- text: 调用接口
+- combobox:
+  - option "选择要调用的接口…"
+  - option "GET /api/counter" [selected]
+  - option "GET /api/headers"
+  - option "GET /api/hello"
+  - option "GET /api/hello"
+  - option "GET /api/counter"
+  - option "GET /api/headers"
+  - option "GET /api/hello"
+- img
+- text: 调用间隔
+- button "30 秒"
+- button "1 分钟"
+- button "5 分钟"
+- button "10 分钟"
+- button "30 分钟"
+- button "1 小时"
+- button "5 小时"
+- button "24 小时"
+- img
+- text: 开始时间
+- button "点击选择开始时间":
+  - img
+  - text: 点击选择开始时间
+- paragraph: 留空则保存后立即调度
+- button "保存修改":
+  - img
+  - text: 保存修改
+- button "立即发送":
+  - img
+  - text: 立即发送
+- button "清空":
+  - img
+  - text: 清空
+- text: GET gui-健康检查
+- button "立即发送":
+  - img
+  - text: 立即发送
+- text: 200 1ms 每 30 秒 已执行 1 次 状态 运行中
+- img
+- text: 执行记录 暂无执行记录，保存后开始调度

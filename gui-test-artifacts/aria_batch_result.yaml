@@ -1,0 +1,151 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - text: 批量任务
+  - button "新建空白任务":
+    - img
+  - textbox "新文件夹名"
+  - button "新建文件夹":
+    - img
+  - img
+  - heading "暂无批量任务" [level=3]
+  - paragraph: 点击右上角 + 新建，用变量模板与多行数据批量调用同一接口。
+- textbox: 未命名批量任务
+- combobox:
+  - option "未分组" [selected]
+- img
+- button "保存":
+  - img
+  - text: 保存
+- button:
+  - img
+- paragraph:
+  - text: 用一个基础请求模板，通过
+  - code: "{{变量名}}"
+  - text: 占位符区分每次调用的参数。参数行单元格或模板里还可使用动态变量：
+  - code: "{{$timestamp}}"
+  - text: 、
+  - code: "{{$datetime}}"
+  - text: 、
+  - code: "{{$date}}"
+  - text: 、
+  - code: "{{$time}}"
+  - text: 、
+  - code: "{{$uuid}}"
+  - text: （每行不同）、
+  - code: "{{$random(1,100)}}"
+  - text: 。保存后即使关闭本面板也不会丢失。
+- combobox:
+  - option "GET" [selected]
+  - option "POST"
+  - option "PUT"
+  - option "DELETE"
+  - option "PATCH"
+  - option "HEAD"
+  - option "OPTIONS"
+- img
+- 'textbox "https://api.example.com/users/{{id}}"': "http://127.0.0.1:8765/api/echo?id={{id}}"
+- text: "Headers（值可含 {{var}}）"
+- button "添加 Header":
+  - img
+  - text: 添加 Header
+- text: "Body（可含 {{var}}）"
+- 'textbox "{ \"id\": \"{{id}}\" }"':
+  - /placeholder: "{\n  \"id\": \"{{id}}\"\n}"
+- text: 变量名（占位符）
+- button "变量":
+  - img
+  - text: 变量
+- text: "{{"
+- textbox: id
+- text: "}}"
+- button [disabled]:
+  - img
+- text: 参数行（每行 = 一次调用）
+- img
+- text: 上传 CSV
+- button "粘贴 JSON/CSV":
+  - img
+  - text: 粘贴 JSON/CSV
+- button "行":
+  - img
+  - text: 行
+- table:
+  - rowgroup:
+    - row "# id":
+      - columnheader "#"
+      - columnheader "id"
+      - columnheader
+  - rowgroup:
+    - row "1 1":
+      - cell "1"
+      - cell "1":
+        - textbox: "1"
+      - cell:
+        - button:
+          - img
+    - row "2 2":
+      - cell "2"
+      - cell "2":
+        - textbox: "2"
+      - cell:
+        - button:
+          - img
+- checkbox "串行执行" [checked]
+- text: 串行执行
+- button "运行（2 次）":
+  - img
+  - text: 运行（2 次）
+- text: 执行结果（2 次，2 成功 /0 失败）
+- table:
+  - rowgroup:
+    - row "# 发送时间 状态 耗时 变量值 响应":
+      - columnheader "#"
+      - columnheader "发送时间"
+      - columnheader "状态"
+      - columnheader "耗时"
+      - columnheader "变量值"
+      - columnheader "响应"
+  - rowgroup:
+    - 'row "1 0秒前 200 1ms id=1 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
+      - cell "1"
+      - cell "0秒前"
+      - cell "200"
+      - cell "1ms"
+      - cell "id=1"
+      - 'cell "{\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"'
+    - 'row "2 0秒前 200 2ms id=2 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
+      - cell "2"
+      - cell "0秒前"
+      - cell "200"
+      - cell "2ms"
+      - cell "id=2"
+      - 'cell "{\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"'

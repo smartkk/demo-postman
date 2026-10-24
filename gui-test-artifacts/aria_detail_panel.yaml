@@ -1,0 +1,146 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - img
+  - textbox "搜索接口 / 域名 / 名称…"
+  - text: 共 5 个接口
+  - button "导入集合":
+    - img
+  - button "导出集合":
+    - img
+  - button "新建分组":
+    - img
+  - button "选择管理":
+    - img
+  - button "批量删除":
+    - img
+  - button "筛选器":
+    - img
+  - img
+  - text: 127.0.0.1 1
+  - button "删除分组（接口移至未分组）":
+    - img
+  - button "GET /api/hello 状态 500 127.0.0.1:8765 ×3 2小时前 抓取": GET /api/hello 127.0.0.1:8765 ×3 2小时前 抓取
+  - button "收藏置顶":
+    - img
+  - button "删除该接口":
+    - img
+  - img
+  - text: 未分组 4
+  - button "GET /api/hello 状态 无 127.0.0.1:8765 ×1 1秒前 手动": GET /api/hello 127.0.0.1:8765 ×1 1秒前 手动
+  - button "收藏置顶":
+    - img
+  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 2小时前 手动": GET /api/counter 127.0.0.1:8765 ×1 2小时前 手动
+  - button "收藏置顶":
+    - img
+  - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 2小时前 手动": GET /api/headers 127.0.0.1:8765 ×2 2小时前 手动
+  - button "收藏置顶":
+    - img
+  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 2小时前 手动": GET /api/hello 127.0.0.1:8765 ×2 2小时前 手动
+  - button "收藏置顶":
+    - img
+- main:
+  - combobox:
+    - option "GET" [selected]
+    - option "POST"
+    - option "PUT"
+    - option "DELETE"
+    - option "PATCH"
+    - option "HEAD"
+    - option "OPTIONS"
+  - img
+  - textbox "https://api.example.com/users": http://127.0.0.1:8765/api/hello?from=proxy
+  - button "发送":
+    - img
+    - text: 发送
+  - button "复制":
+    - img
+    - text: 复制
+  - button "cURL":
+    - img
+    - text: cURL
+  - button "收藏置顶":
+    - img
+  - button "复制接口":
+    - img
+    - text: 复制接口
+  - button "删除":
+    - img
+    - text: 删除
+  - button "保存修改":
+    - img
+    - text: 保存修改
+  - button "重置":
+    - img
+    - text: 重置
+  - img
+  - combobox:
+    - option "未分组" [selected]
+  - img
+  - text: 浏览器抓取
+  - button "Headers (4)"
+  - button "Query (1)"
+  - button "参数"
+  - button "Body"
+  - button "响应"
+  - text: 名称（可选，留空则用路径）
+  - textbox "/api/hello"
+  - text: Headers
+  - textbox "key": host
+  - textbox "value": 127.0.0.1:8765
+  - button:
+    - img
+  - textbox "key": user-agent
+  - textbox "value": curl/8.7.1
+  - button:
+    - img
+  - textbox "key": accept
+  - textbox "value": "*/*"
+  - button:
+    - img
+  - textbox "key": proxy-connection
+  - textbox "value": Keep-Alive
+  - button:
+    - img
+  - textbox "key"
+  - textbox "value"
+  - button:
+    - img
+  - button "添加一行":
+    - img
+    - text: 添加一行
+  - text: 鉴权（自动写入 Authorization 头）
+  - combobox:
+    - option "无" [selected]
+    - option "Bearer Token"
+    - option "Basic Auth"
+  - img
+  - text: 调用次数 3 创建时间 2小时前 最近发送 2小时前 最近更新 2小时前

@@ -1,0 +1,68 @@
+- banner:
+  - img
+  - text: Demo Postman 接口记录工具
+  - button "代理运行中 · :8899"
+  - button "插件端点 · :8891":
+    - img
+    - text: 插件端点 · :8891
+  - button "配置系统代理":
+    - img
+    - text: 配置系统代理
+  - button "手动录入":
+    - img
+    - text: 手动录入
+  - button "切换到浅色主题":
+    - img
+  - button "设置":
+    - img
+    - text: 设置
+- complementary:
+  - button "接口":
+    - img
+    - text: 接口
+  - button "定时":
+    - img
+    - text: 定时
+  - button "链式":
+    - img
+    - text: 链式
+  - button "批量":
+    - img
+    - text: 批量
+  - text: 定时任务
+  - button "新建定时任务":
+    - img
+  - img
+  - heading "暂无定时任务" [level=3]
+  - paragraph: 点击右上角 + 新建，按固定间隔自动调用接口或链式任务。
+- img
+- text: 新建定时任务 任务名称
+- textbox "如：健康检查 / 每小时同步"
+- text: 执行类型
+- button "单接口"
+- button "链式任务"
+- text: 调用接口
+- combobox:
+  - option "选择要调用的接口…" [selected]
+- img
+- text: 调用间隔
+- button "30 秒"
+- button "1 分钟"
+- button "5 分钟"
+- button "10 分钟"
+- button "30 分钟"
+- button "1 小时"
+- button "5 小时"
+- button "24 小时"
+- img
+- text: 开始时间
+- button "点击选择开始时间":
+  - img
+  - text: 点击选择开始时间
+- paragraph: 留空则保存后立即调度
+- button "添加任务" [disabled]:
+  - img
+  - text: 添加任务
+- button "清空":
+  - img
+  - text: 清空
