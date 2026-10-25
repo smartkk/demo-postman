@@ -60,6 +60,14 @@ export function filesToRows(files: FolderFile[]): BatchRow[] {
   return rows;
 }
 
+/** 把参数行写回文件（与 filesToRows 互逆）：每行一个 JSON 文件，序号命名保证顺序。 */
+export function rowsToFiles(rows: BatchRow[]): FolderFile[] {
+  return rows.map((r, i) => ({
+    name: `${String(i + 1).padStart(3, '0')}.json`,
+    content: JSON.stringify(r, null, 2),
+  }));
+}
+
 /** 从文本中提取第一个 JSON 数组（容忍 markdown 代码块与前后说明文字）。 */
 export function extractJsonArray(text: string): unknown[] | null {
   if (!text) return null;

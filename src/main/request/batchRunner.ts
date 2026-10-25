@@ -114,6 +114,22 @@ export function resolveEnvVars(
 }
 
 /**
+ * 行变量补全：批量模板声明过的变量（input.variables，含参数文件夹模式下各文件键的并集）
+ * 在该行缺键时补空串，避免 {{var}} 残留字面量被发往服务器。
+ * 未声明的占位符不受影响（仍走环境变量 / 动态变量解析链）。
+ */
+export function completeRowVars(
+  row: Record<string, string>,
+  variables: string[]
+): Record<string, string> {
+  const out = { ...row };
+  for (const v of variables) {
+    if (!(v in out)) out[v] = '';
+  }
+  return out;
+}
+
+/**
  * 批量调用：同一基础请求，按每行变量值替换后逐个/并发发送，返回每行的发送时间 + 结果。
  * @param env 当前激活环境的环境变量（可选），先替换进基础模板，再按行替换。
  */
@@ -136,9 +152,11 @@ export async function runBatchCall(
     index: number
   ): Promise<BatchCallResult> => {
     const sentAt = new Date().toISOString();
-    // 先解析参数行单元格值里的动态变量（如 {{$uuid}}、{{$timestamp}}），每行独立生成
+    // 先解析参数行单元格值里的动态变量（如 {{$uuid}}、{{$timestamp}}），每行独立生成；
+    // 模板声明过但该行缺失的变量补空串（文件夹模式下不同文件的键集可能不同）
+    const rowFilled = completeRowVars(row, input.variables || []);
     const resolvedRow: Record<string, string> = {};
-    for (const [k, v] of Object.entries(row)) resolvedRow[k] = resolveDynamic(v);
+    for (const [k, v] of Object.entries(rowFilled)) resolvedRow[k] = resolveDynamic(v);
     const request = resolvePlaceholders(baseResolved, resolvedRow);
     try {
       // 批量是无人值守场景，必须带超时，否则服务不可达时会堆积永不释放的连接

@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
+import { app, ipcMain, BrowserWindow, shell, dialog } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { InterfaceStore } from '../storage/interfaceStore';
@@ -13,6 +13,7 @@ import type {
   BatchCallInput,
   BatchCallResult,
   BatchProject,
+  BatchRow,
   CaptureInput,
   CaptureSettings,
   ChainProject,
@@ -30,6 +31,61 @@ import type {
 import { AUTO_TIMEOUT_MS, sendRequest } from '../request/sender';
 import { resolveDynamic, resolveEnv, runBatchCall } from '../request/batchRunner';
 import { preprocessWithAi } from '../ai/aiClient';
+import { filesToRows, rowsToFiles } from '../../shared/params';
+
+// 单文件读取上限 1MB、最多 200 个：参数文件远用不到这么大，
+// 超限直接跳过并在结果中标注，避免把大日志/二进制整进内存。
+const MAX_FILE_BYTES = 1024 * 1024;
+const MAX_FILES = 200;
+
+/** 读取文件夹中的文本文件（按文件名自然排序），供「预览 / 导入 / 执行时实时读取」共用。 */
+function readFolderFilesFromDisk(
+  folder: string
+): { files: FolderFile[]; skipped: string[] } {
+  const files: FolderFile[] = [];
+  const skipped: string[] = [];
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(folder, { withFileTypes: true });
+  } catch (err) {
+    throw new Error('无法读取文件夹：' + (err instanceof Error ? err.message : String(err)));
+  }
+  const names = entries
+    .filter((d) => d.isFile())
+    .map((d) => d.name)
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  for (const name of names) {
+    if (files.length >= MAX_FILES) {
+      skipped.push(`${name}（超出数量上限 ${MAX_FILES}）`);
+      continue;
+    }
+    const full = path.join(folder, name);
+    try {
+      const size = fs.statSync(full).size;
+      if (size > MAX_FILE_BYTES) {
+        skipped.push(`${name}（超过 1MB）`);
+        continue;
+      }
+      files.push({ name, content: fs.readFileSync(full, 'utf8') });
+    } catch {
+      skipped.push(`${name}（读取失败）`);
+    }
+  }
+  return { files, skipped };
+}
+
+/** 执行时把参数文件夹解析为变量与参数行（每次执行实时读取，文件增删即生效）。 */
+export function resolveParamFolder(paramFolder: string): {
+  variables: string[];
+  rows: BatchRow[];
+  skipped: string[];
+} {
+  const { files, skipped } = readFolderFilesFromDisk(paramFolder);
+  const rows = filesToRows(files);
+  const keys = new Set<string>();
+  rows.forEach((o) => Object.keys(o).forEach((k) => keys.add(k)));
+  return { variables: [...keys], rows, skipped };
+}
 
 /** 在途请求的中断控制器（按接口 id 索引），用于「取消发送」。 */
 const inFlight = new Map<string, AbortController>();
@@ -153,7 +209,8 @@ export function registerIpc(
   getWin: () => BrowserWindow | null,
   scheduleManager?: ScheduleManager,
   batchStore?: BatchStore,
-  chainStore?: ChainStore
+  chainStore?: ChainStore,
+  dataDir = ''
 ): void {
   const status = (): ProxyStatus => ({
     running: proxy.running,
@@ -239,11 +296,23 @@ export function registerIpc(
   });
   ipcMain.handle(
     'request:batchSend',
-    (_e, input: BatchCallInput): Promise<BatchCallResult[]> =>
-      runBatchCall(
-        input,
+    (_e, input: BatchCallInput): Promise<BatchCallResult[]> => {
+      const effective =
+        input.paramFolder && input.paramFolder.trim()
+          ? (() => {
+              // 参数文件夹模式：执行时实时读取文件作为参数行
+              const resolved = resolveParamFolder(input.paramFolder);
+              if (!resolved.rows.length) {
+                throw new Error(`参数文件夹中没有可读取的文件：${input.paramFolder}`);
+              }
+              return { ...input, variables: resolved.variables, rows: resolved.rows };
+            })()
+          : input;
+      return runBatchCall(
+        effective,
         settings.get().environments?.[settings.get().activeEnv || '']
-      )
+      );
+    }
   );
 
   // ── 批量调用任务（可持久化保存，按文件夹分组） ──
@@ -269,14 +338,25 @@ export function registerIpc(
       async (_e, id: string): Promise<BatchCallResult[]> => {
         const p = batchStore!.get(id);
         if (!p) throw new Error('批量任务不存在');
+        // 绑定了参数文件夹时，执行时实时读取文件作为参数行
+        let variables = p.variables;
+        let rows = p.rows;
+        if (p.paramFolder && p.paramFolder.trim()) {
+          const resolved = resolveParamFolder(p.paramFolder);
+          if (!resolved.rows.length) {
+            throw new Error(`参数文件夹中没有可读取的文件：${p.paramFolder}`);
+          }
+          variables = resolved.variables;
+          rows = resolved.rows;
+        }
         const results = await runBatchCall(
           {
             method: p.method,
             url: p.url,
             headers: p.headers,
             body: p.body,
-            variables: p.variables,
-            rows: p.rows,
+            variables,
+            rows,
             sequential: p.sequential,
           },
           settings.get().environments?.[settings.get().activeEnv || '']
@@ -451,7 +531,7 @@ export function registerIpc(
     }
   );
 
-  // ── 文件夹参数导入（批量调用）：选择目录并读取其中的文本文件 ──
+  // ── 文件夹参数（批量调用）：预览读取 / 预处理结果落盘 ──
   ipcMain.handle('fs:pickFolder', async (): Promise<string | null> => {
     const win = getWin();
     if (!win) return null;
@@ -463,43 +543,33 @@ export function registerIpc(
     return res.filePaths[0];
   });
 
-  // 单文件读取上限 1MB、最多 200 个：参数文件远用不到这么大，
-  // 超限直接跳过并在结果中标注，避免把大日志/二进制整进内存。
-  const MAX_FILE_BYTES = 1024 * 1024;
-  const MAX_FILES = 200;
   ipcMain.handle(
     'fs:readFolderFiles',
-    (_e, folder: string): { files: FolderFile[]; skipped: string[] } => {
-      const files: FolderFile[] = [];
-      const skipped: string[] = [];
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(folder, { withFileTypes: true });
-      } catch (err) {
-        throw new Error('无法读取文件夹：' + (err instanceof Error ? err.message : String(err)));
+    (_e, folder: string): { files: FolderFile[]; skipped: string[] } =>
+      readFolderFilesFromDisk(folder)
+  );
+
+  // AI 预处理结果落盘：每行参数写成一个 JSON 文件，返回新建的文件夹路径。
+  // 目录固定在数据目录 batch-params/ 下，避免散落，也随「文件保存位置」一起迁移。
+  ipcMain.handle(
+    'fs:writeParamFolder',
+    (_e, rows: BatchRow[]): { folder: string; count: number } => {
+      if (!Array.isArray(rows) || rows.length === 0) {
+        throw new Error('没有可写入的参数行');
       }
-      const names = entries
-        .filter((d) => d.isFile())
-        .map((d) => d.name)
-        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      for (const name of names) {
-        if (files.length >= MAX_FILES) {
-          skipped.push(`${name}（超出数量上限 ${MAX_FILES}）`);
-          continue;
-        }
-        const full = path.join(folder, name);
-        try {
-          const size = fs.statSync(full).size;
-          if (size > MAX_FILE_BYTES) {
-            skipped.push(`${name}（超过 1MB）`);
-            continue;
-          }
-          files.push({ name, content: fs.readFileSync(full, 'utf8') });
-        } catch (err) {
-          skipped.push(`${name}（读取失败）`);
-        }
+      const stamp = new Date();
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const dirname = `pp-${stamp.getFullYear()}${pad(stamp.getMonth() + 1)}${pad(
+        stamp.getDate()
+      )}-${pad(stamp.getHours())}${pad(stamp.getMinutes())}${pad(
+        stamp.getSeconds()
+      )}-${Math.random().toString(36).slice(2, 6)}`;
+      const folder = path.join(dataDir || app.getPath('userData'), 'batch-params', dirname);
+      fs.mkdirSync(folder, { recursive: true });
+      for (const f of rowsToFiles(rows)) {
+        fs.writeFileSync(path.join(folder, f.name), f.content, 'utf8');
       }
-      return { files, skipped };
+      return { folder, count: rows.length };
     }
   );
 }

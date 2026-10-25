@@ -29,124 +29,56 @@
   - button "批量":
     - img
     - text: 批量
-  - img
-  - textbox "搜索接口 / 域名 / 名称…"
-  - text: 共 1 个接口
-  - button "导入集合":
-    - img
-  - button "导出集合":
-    - img
-  - button "新建分组":
-    - img
-  - button "选择管理":
-    - img
-  - button "批量删除":
-    - img
-  - button "筛选器":
+  - text: 定时任务
+  - button "新建定时任务":
     - img
   - img
-  - text: 未分组 1
-  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 2秒前 手动": GET /api/hello 127.0.0.1:8765 ×2 2秒前 手动
-  - button "收藏置顶":
+  - text: gui-健康检查
+  - button "点击启用":
     - img
-- main:
-  - combobox:
-    - option "GET" [selected]
-    - option "POST"
-    - option "PUT"
-    - option "DELETE"
-    - option "PATCH"
-    - option "HEAD"
-    - option "OPTIONS"
-  - img
-  - textbox "https://api.example.com/users": http://127.0.0.1:8765/api/hello
-  - button "发送":
-    - img
-    - text: 发送
-  - button "复制":
-    - img
-    - text: 复制
-  - button "cURL":
-    - img
-    - text: cURL
-  - button "收藏置顶":
-    - img
-  - button "复制接口":
-    - img
-    - text: 复制接口
   - button "删除":
     - img
-    - text: 删除
-  - button "保存修改":
-    - img
-    - text: 保存修改
-  - button "重置":
-    - img
-    - text: 重置
-  - img
-  - combobox:
-    - option "未分组" [selected]
-  - img
-  - text: 手动创建
-  - button "Headers (0)"
-  - button "Query (0)"
-  - button "参数"
-  - button "Body"
-  - button "响应"
-  - text: 名称（可选，留空则用路径）
-  - textbox "/api/hello"
-  - text: 200 OK 6 ms 2秒前 手动发送 响应 Headers content-type application/json date Sat, 24 Oct 2026 07:47:26 GMT connection keep-alive keep-alive timeout=5 content-length 61 响应 Body json 61 B
-  - img
-  - textbox "搜索内容"
-  - button "展开全部"
-  - button "折叠全部"
-  - button "原始":
-    - img
-    - text: 原始
-  - button "下载":
-    - img
-    - text: 下载
-  - button "复制":
-    - img
-    - text: 复制
-  - button "收起":
-    - img
-  - text: "{ \"message\": \"hello from test server\", \"token\": \"TKN-9527\", \"n\": 2 } 调用次数 2 创建时间 4秒前 最近发送 2秒前 最近更新 2秒前"
-- heading "手动录入接口" [level=2]
-- button:
-  - img
-- button "从 curl 导入":
-  - img
-  - text: 从 curl 导入
-  - img
-- combobox:
-  - option "GET" [selected]
-  - option "POST"
-  - option "PUT"
-  - option "DELETE"
-  - option "PATCH"
-  - option "HEAD"
-  - option "OPTIONS"
 - img
-- textbox "https://api.example.com/users"
-- text: Headers
-- textbox "key"
-- textbox "value"
-- button:
+- text: 编辑定时任务 任务名称
+- textbox "如：健康检查 / 每小时同步": gui-健康检查
+- text: 执行类型
+- button "单接口"
+- button "链式任务"
+- text: 调用接口
+- combobox:
+  - option "选择要调用的接口…"
+  - option "GET /api/counter" [selected]
+  - option "GET /api/headers"
+  - option "GET /api/hello"
+- img
+- text: 调用间隔
+- button "30 秒"
+- button "1 分钟"
+- button "5 分钟"
+- button "10 分钟"
+- button "30 分钟"
+- button "1 小时"
+- button "5 小时"
+- button "24 小时"
+- img
+- text: 开始时间
+- button "点击选择开始时间":
   - img
-- button "添加一行":
+  - text: 点击选择开始时间
+- paragraph: 留空则保存后立即调度
+- button "保存修改":
   - img
-  - text: 添加一行
-- text: Query 参数
-- textbox "param"
-- textbox "value"
-- button:
+  - text: 保存修改
+- button "立即发送":
   - img
-- button "添加一行":
+  - text: 立即发送
+- button "清空":
   - img
-  - text: 添加一行
-- text: Body
-- 'textbox "{ \"key\": \"value\" }"':
-  - /placeholder: "{\r\n  \"key\": \"value\"\r\n}"
-- button "取消"
-- button "保存（自动去重）" [disabled]
+  - text: 清空
+- text: GET gui-健康检查
+- button "立即发送":
+  - img
+  - text: 立即发送
+- text: 200 3ms 每 30 秒 已执行 2 次 状态 已停用
+- img
+- text: 执行记录 暂无执行记录，保存后开始调度

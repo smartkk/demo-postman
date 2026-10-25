@@ -31,7 +31,7 @@
     - text: 批量
   - img
   - textbox "搜索接口 / 域名 / 名称…"
-  - text: 共 10 个接口
+  - text: 共 4 个接口
   - button "导入集合":
     - img
   - button "导出集合":
@@ -48,36 +48,18 @@
   - text: 127.0.0.1 1
   - button "删除分组（接口移至未分组）":
     - img
-  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×9 0秒前 抓取": GET /api/hello 127.0.0.1:8765 ×9 0秒前 抓取
+  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×1 0秒前 抓取": GET /api/hello 127.0.0.1:8765 ×1 0秒前 抓取
   - button "收藏置顶":
     - img
   - img
-  - text: 未分组 9
+  - text: 未分组 3
   - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 1分钟前 手动": GET /api/counter 127.0.0.1:8765 ×1 1分钟前 手动
   - button "收藏置顶":
     - img
   - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 1分钟前 手动": GET /api/headers 127.0.0.1:8765 ×2 1分钟前 手动
   - button "收藏置顶":
     - img
-  - button "GET /api/hello 状态 无 127.0.0.1:8765 ×1 1分钟前 手动": GET /api/hello 127.0.0.1:8765 ×1 1分钟前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 21小时前 手动": GET /api/counter 127.0.0.1:8765 ×1 21小时前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 21小时前 手动": GET /api/headers 127.0.0.1:8765 ×2 21小时前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/hello 状态 无 127.0.0.1:8765 ×1 21小时前 手动": GET /api/hello 127.0.0.1:8765 ×1 21小时前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 23小时前 手动": GET /api/counter 127.0.0.1:8765 ×1 23小时前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 23小时前 手动": GET /api/headers 127.0.0.1:8765 ×2 23小时前 手动
-  - button "收藏置顶":
-    - img
-  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 23小时前 手动": GET /api/hello 127.0.0.1:8765 ×2 23小时前 手动
+  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 1分钟前 手动": GET /api/hello 127.0.0.1:8765 ×2 1分钟前 手动
   - button "收藏置顶":
     - img
 - main:

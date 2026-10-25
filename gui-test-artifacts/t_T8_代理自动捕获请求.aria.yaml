@@ -53,7 +53,7 @@
     - img
   - img
   - text: 未分组 3
-  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 59秒前 手动": GET /api/counter 127.0.0.1:8765 ×1 59秒前 手动
+  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 1分钟前 手动": GET /api/counter 127.0.0.1:8765 ×1 1分钟前 手动
   - button "收藏置顶":
     - img
   - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 1分钟前 手动": GET /api/headers 127.0.0.1:8765 ×2 1分钟前 手动
@@ -126,4 +126,4 @@
     - option "Bearer Token"
     - option "Basic Auth"
   - img
-  - text: 调用次数 1 创建时间 59秒前 最近发送 — 最近更新 59秒前
+  - text: 调用次数 1 创建时间 1分钟前 最近发送 — 最近更新 1分钟前

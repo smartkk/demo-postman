@@ -58,7 +58,12 @@ async function step(win, name, fn) {
 
 (async () => {
   const app = await electron.launch({
-    args: ['.', `--user-data-dir=${path.join(ART, 'electron-data')}`],
+    args: [
+      '.',
+      `--user-data-dir=${path.join(ART, 'electron-data')}`,
+      // 绕开 Google Fonts 远端字体：网络挂起时 document.fonts.ready 不完成会卡死截图
+      '--disable-remote-fonts',
+    ],
     cwd: REPO,
   });
   const win = await app.firstWindow();

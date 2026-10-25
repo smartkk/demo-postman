@@ -50,11 +50,11 @@
 - paragraph:
   - text: 用一个基础请求模板，通过
   - code: "{{变量名}}"
-  - text: 占位符区分每次调用的参数。参数行可来自手动输入、CSV/JSON 粘贴、
-  - code: 选择文件夹
-  - text: （按文件名顺序、每个文件一行）或
+  - text: 占位符区分每次调用的参数。参数来源三选一：手动参数行（CSV/JSON 粘贴）、
+  - code: 绑定文件夹
+  - text: （执行时按文件名顺序实时读取，每个文件一次调用）或
   - code: AI 预处理
-  - text: （在设置中配置 OpenAI 兼容接口）。 参数行单元格或模板里还可使用动态变量：
+  - text: （结果默认写入参数文件夹并绑定）。 参数行单元格或模板里还可使用动态变量：
   - code: "{{$timestamp}}"
   - text: 、
   - code: "{{$datetime}}"
@@ -97,9 +97,9 @@
 - button "AI 预处理":
   - img
   - text: AI 预处理
-- button "选择文件夹":
+- button "绑定文件夹":
   - img
-  - text: 选择文件夹
+  - text: 绑定文件夹
 - img
 - text: 上传 CSV
 - button "粘贴 JSON/CSV":

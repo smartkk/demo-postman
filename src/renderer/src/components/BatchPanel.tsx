@@ -38,6 +38,13 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const [body, setBody] = useState('');
   const [variables, setVariables] = useState<string[]>(['id']);
   const [rows, setRows] = useState<BatchRow[]>([{ id: '1' }, { id: '2' }]);
+  // 参数文件夹（与 rows 二选一，绑定后执行时实时读取文件夹下的文件）
+  const [paramFolder, setParamFolder] = useState('');
+  const [folderInfo, setFolderInfo] = useState<{
+    count: number;
+    variables: string[];
+    skipped: string[];
+  } | null>(null);
   const [sequential, setSequential] = useState(true);
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<BatchCallResult[] | null>(null);
@@ -220,22 +227,40 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     );
   };
 
-  const importFolderParams = async () => {
+  /* ── 参数文件夹：绑定后执行时按文件名顺序实时读取，每个文件一行依次发送 ── */
+  const loadFolderInfo = async (dir: string) => {
+    const { files, skipped } = await api.readFolderFiles(dir);
+    const parsed = filesToRows(files);
+    const keys = new Set<string>();
+    parsed.forEach((o) => Object.keys(o).forEach((k) => keys.add(k)));
+    const info = { count: files.length, variables: [...keys], skipped };
+    setFolderInfo(info);
+    setVariables([...keys]);
+    return info;
+  };
+
+  const bindFolder = async (dir?: string) => {
     try {
-      const dir = await api.pickFolder();
-      if (!dir) return;
-      const { files, skipped } = await api.readFolderFiles(dir);
-      if (!files.length) {
+      const target = dir ?? (await api.pickFolder());
+      if (!target) return;
+      const info = await loadFolderInfo(target);
+      if (!info.count) {
         showToast('文件夹中没有可读取的文本文件', 'error');
         return;
       }
-      applyRows(
-        filesToRows(files),
-        `已读取 ${files.length} 个文件${skipped.length ? `（跳过 ${skipped.length} 个）` : ''}，`
+      setParamFolder(target);
+      showToast(
+        `已绑定参数文件夹（${info.count} 个文件），执行时将按文件名顺序依次发送`,
+        'success'
       );
     } catch (e) {
       showToast('读取文件夹失败：' + (e instanceof Error ? e.message : String(e)), 'error');
     }
+  };
+
+  const unbindFolder = () => {
+    setParamFolder('');
+    setFolderInfo(null);
   };
 
   /* ── AI 预处理：原始数据 -> 结构化参数行（OpenAI 兼容接口，在设置中配置） ── */
@@ -278,8 +303,31 @@ export function BatchPanel({ selectedId, onClose }: Props) {
       setAiError('无法从 AI 回复中解析出 JSON 数组，可手动修改结果后重试');
       return;
     }
+    // 手动行模式：解除文件夹绑定，避免执行时仍走旧文件夹
+    unbindFolder();
     applyRows(parsed, 'AI 预处理完成，');
     setShowAi(false);
+  };
+
+  /** 默认路径：AI 结果写入参数文件夹（每行一个文件）并绑定，执行时实时读取发送 */
+  const applyAiResultToFolder = async () => {
+    const parsed = rowsFromAiText(aiResult);
+    if (!parsed || !parsed.length) {
+      setAiError('无法从 AI 回复中解析出 JSON 数组，可手动修改结果后重试');
+      return;
+    }
+    try {
+      const { folder, count } = await api.writeParamFolder(parsed);
+      await loadFolderInfo(folder);
+      setParamFolder(folder);
+      setShowAi(false);
+      showToast(
+        `AI 结果已写入参数文件夹（${count} 个文件）并绑定，执行时按顺序依次读取发送`,
+        'success'
+      );
+    } catch (e) {
+      setAiError('写入参数文件夹失败：' + (e instanceof Error ? e.message : String(e)));
+    }
   };
 
   /* ── 保存当前配置为项目 ── */
@@ -293,6 +341,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     rows,
     sequential,
     folder,
+    ...(paramFolder ? { paramFolder } : {}),
   });
 
   const doSave = async () => {
@@ -329,6 +378,14 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setFolder(p.folder || '');
     setResults(p.results ?? null);
     setError('');
+    // 绑定参数文件夹的项目：恢复绑定并刷新预览
+    if (p.paramFolder) {
+      setParamFolder(p.paramFolder);
+      loadFolderInfo(p.paramFolder).catch(() => setFolderInfo(null));
+    } else {
+      setParamFolder('');
+      setFolderInfo(null);
+    }
   };
 
   /* ── 运行：当前编辑区 或 已保存项目 ── */
@@ -352,8 +409,8 @@ export function BatchPanel({ selectedId, onClose }: Props) {
         setError('请填写请求地址');
         return;
       }
-      if (rows.length === 0) {
-        setError('请至少添加一行参数');
+      if (!paramFolder && rows.length === 0) {
+        setError('请至少添加一行参数，或绑定一个参数文件夹');
         return;
       }
       setError('');
@@ -366,8 +423,10 @@ export function BatchPanel({ selectedId, onClose }: Props) {
           headers,
           body: body.trim() ? body : null,
           variables,
-          rows,
+          // 绑定文件夹时行数据由主进程执行时实时读取，rows 仅作回退
+          rows: paramFolder ? [] : rows,
           sequential,
+          ...(paramFolder ? { paramFolder } : {}),
         };
         const res = await api.batchSend(input);
         setResults(res);
@@ -377,7 +436,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
         setRunning(false);
       }
     },
-    [url, rows, method, headers, body, variables, sequential, activeId, refreshList]
+    [url, rows, method, headers, body, variables, sequential, activeId, refreshList, paramFolder]
   );
 
   const newProject = () => {
@@ -392,6 +451,8 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setFolder('');
     setResults(null);
     setError('');
+    setParamFolder('');
+    setFolderInfo(null);
   };
 
   const deleteProject = async (id: string) => {
@@ -450,9 +511,9 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
           <p className="mb-4 text-[12px] leading-relaxed text-slate-400">
             用一个基础请求模板，通过 <code className="text-brand-light">{'{{变量名}}'}</code>{' '}
-            占位符区分每次调用的参数。参数行可来自手动输入、CSV/JSON 粘贴、
-            <code className="text-brand-light">选择文件夹</code>（按文件名顺序、每个文件一行）或
-            <code className="text-brand-light">AI 预处理</code>（在设置中配置 OpenAI 兼容接口）。
+            占位符区分每次调用的参数。参数来源三选一：手动参数行（CSV/JSON 粘贴）、
+            <code className="text-brand-light">绑定文件夹</code>（执行时按文件名顺序实时读取，每个文件一次调用）或
+            <code className="text-brand-light">AI 预处理</code>（结果默认写入参数文件夹并绑定）。
             参数行单元格或模板里还可使用动态变量：
             <code className="text-brand-light">{'{{$timestamp}}'}</code>、<code className="text-brand-light">{'{{$datetime}}'}</code>、
             <code className="text-brand-light">{'{{$date}}'}</code>、<code className="text-brand-light">{'{{$time}}'}</code>、
@@ -535,7 +596,9 @@ export function BatchPanel({ selectedId, onClose }: Props) {
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-[12px] font-medium text-slate-400">
-                参数行（每行 = 一次调用）
+                {paramFolder
+                  ? `参数来源：文件夹（${folderInfo?.count ?? '…'} 个文件，执行时实时读取）`
+                  : '参数行（每行 = 一次调用）'}
               </span>
               <div className="flex gap-2">
                 <button
@@ -546,11 +609,11 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                   <Sparkles size={12} /> AI 预处理
                 </button>
                 <button
-                  onClick={importFolderParams}
-                  title="选择文件夹：按文件名顺序读取其中所有文件，每个文件生成一行参数依次执行"
+                  onClick={() => bindFolder()}
+                  title="绑定参数文件夹：执行时按文件名顺序实时读取，每个文件依次发送一次"
                   className="flex items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
                 >
-                  <FolderOpen size={12} /> 选择文件夹
+                  <FolderOpen size={12} /> 绑定文件夹
                 </button>
                 <label className="flex cursor-pointer items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700">
                   <Upload size={12} /> 上传 CSV
@@ -597,16 +660,74 @@ export function BatchPanel({ selectedId, onClose }: Props) {
               </div>
             )}
 
-            <div className="overflow-x-auto rounded-lg border border-slate-700/40">
-              <table className="w-full text-[12px]">
-                <thead>
-                  <tr className="border-b border-slate-700/50 text-slate-400">
-                    <th className="px-2 py-1.5 text-left font-medium">#</th>
-                    {variables.map((v, i) => (
-                      <th key={i} className="px-2 py-1.5 text-left font-medium">
-                        {v}
-                      </th>
-                    ))}
+            {paramFolder && (
+              <div className="mb-2 rounded-xl border border-brand/30 bg-brand/5 p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className="flex items-center gap-1.5 text-[12px] font-medium text-slate-200">
+                    <FolderOpen size={13} className="text-brand-light" /> 已绑定参数文件夹
+                  </span>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() =>
+                        loadFolderInfo(paramFolder)
+                          .then((i) => {
+                            if (i.count) {
+                              showToast(
+                                `已刷新：${i.count} 个文件${
+                                  i.skipped.length ? `（跳过 ${i.skipped.length} 个）` : ''
+                                }`,
+                                'info'
+                              );
+                            } else {
+                              showToast('文件夹中没有可读取的文本文件', 'error');
+                            }
+                          })
+                          .catch(() => showToast('刷新失败：文件夹不可读', 'error'))
+                      }
+                      className="rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+                    >
+                      刷新
+                    </button>
+                    <button
+                      onClick={unbindFolder}
+                      className="rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+                    >
+                      解除绑定
+                    </button>
+                  </div>
+                </div>
+                <div className="mb-1.5 break-all rounded-lg border border-slate-700/50 bg-slate-800/60 p-2 font-mono text-[11px] text-slate-300">
+                  {paramFolder}
+                </div>
+                {folderInfo && (
+                  <p className="text-[11.5px] leading-relaxed text-slate-400">
+                    {folderInfo.count} 个文件 · 变量：
+                    {folderInfo.variables.map((v) => `{{${v}}}`).join(' ')}
+                  </p>
+                )}
+                {folderInfo && folderInfo.skipped.length > 0 && (
+                  <p className="mt-1 text-[11px] text-amber-400/90">
+                    跳过 {folderInfo.skipped.length} 个：{folderInfo.skipped.join('、')}
+                  </p>
+                )}
+                <p className="mt-1 text-[10.5px] leading-relaxed text-slate-500">
+                  按文件名顺序依次发送，每个文件一行参数（JSON 键值自动映射为变量，另附
+                  fileName / fileContent）。执行时实时读取：文件夹内容增删后无需重新保存。
+                </p>
+              </div>
+            )}
+
+            {!paramFolder && (
+              <div className="overflow-x-auto rounded-lg border border-slate-700/40">
+                <table className="w-full text-[12px]">
+                  <thead>
+                    <tr className="border-b border-slate-700/50 text-slate-400">
+                      <th className="px-2 py-1.5 text-left font-medium">#</th>
+                      {variables.map((v, i) => (
+                        <th key={i} className="px-2 py-1.5 text-left font-medium">
+                          {v}
+                        </th>
+                      ))}
                     <th className="px-2 py-1.5"></th>
                   </tr>
                 </thead>
@@ -646,6 +767,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                 </tbody>
               </table>
             </div>
+            )}
           </div>
 
           {/* 选项 + 执行 */}
@@ -666,7 +788,12 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                 disabled={running}
                 className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-50 cursor-pointer"
               >
-                <Play size={14} /> {running ? '执行中…' : `运行（${rows.length} 次）`}
+                <Play size={14} />{' '}
+                {running
+                  ? '执行中…'
+                  : paramFolder
+                    ? `运行（文件夹 ${folderInfo?.count ?? '?'} 文件）`
+                    : `运行（${rows.length} 次）`}
               </button>
               {activeId && (
                 <button
@@ -761,7 +888,8 @@ export function BatchPanel({ selectedId, onClose }: Props) {
             <p className="mb-3 text-[11.5px] leading-relaxed text-slate-400">
               粘贴任意原始数据（日志、文档、表格文本……），AI 会将其整理成{' '}
               <code className="text-brand-light">JSON 数组</code>{' '}
-              形式的参数行，每个对象对应一次调用。接口在「设置 → AI
+              形式的参数。默认「写入参数文件夹并绑定」：每行参数存为一个文件，执行时按文件名顺序实时读取依次发送；
+              也可「填充到参数行」手动编辑。接口在「设置 → AI
               预处理设置」中配置（OpenAI 兼容）。
             </p>
 
@@ -826,9 +954,16 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                   <button
                     onClick={applyAiResult}
                     disabled={aiBusy}
-                    className="rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+                    className="rounded-lg border border-slate-600/60 px-4 py-2 text-[13px] font-medium text-slate-300 transition hover:bg-slate-700/50 disabled:opacity-40 cursor-pointer"
                   >
                     填充到参数行
+                  </button>
+                  <button
+                    onClick={applyAiResultToFolder}
+                    disabled={aiBusy}
+                    className="rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+                  >
+                    写入参数文件夹并绑定
                   </button>
                 </>
               ) : (

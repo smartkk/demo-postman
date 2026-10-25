@@ -31,7 +31,7 @@
     - text: 批量
   - img
   - textbox "搜索接口 / 域名 / 名称…"
-  - text: 共 1 个接口
+  - text: 共 4 个接口
   - button "导入集合":
     - img
   - button "导出集合":
@@ -45,8 +45,21 @@
   - button "筛选器":
     - img
   - img
-  - text: 未分组 1
-  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 2秒前 手动": GET /api/hello 127.0.0.1:8765 ×2 2秒前 手动
+  - text: 127.0.0.1 1
+  - button "删除分组（接口移至未分组）":
+    - img
+  - button "GET /api/hello 状态 500 127.0.0.1:8765 ×3 34秒前 抓取": GET /api/hello 127.0.0.1:8765 ×3 34秒前 抓取
+  - button "收藏置顶":
+    - img
+  - img
+  - text: 未分组 3
+  - button "GET /api/counter 状态 无 127.0.0.1:8765 ×1 4分钟前 手动": GET /api/counter 127.0.0.1:8765 ×1 4分钟前 手动
+  - button "收藏置顶":
+    - img
+  - button "GET /api/headers 状态 200 127.0.0.1:8765 ×2 4分钟前 手动": GET /api/headers 127.0.0.1:8765 ×2 4分钟前 手动
+  - button "收藏置顶":
+    - img
+  - button "GET /api/hello 状态 200 127.0.0.1:8765 ×2 4分钟前 手动": GET /api/hello 127.0.0.1:8765 ×2 4分钟前 手动
   - button "收藏置顶":
     - img
 - main:
@@ -87,15 +100,21 @@
   - combobox:
     - option "未分组" [selected]
   - img
-  - text: 手动创建
-  - button "Headers (0)"
-  - button "Query (0)"
+  - text: 浏览器抓取
+  - button "Headers (4)"
+  - button "Query (1)"
   - button "参数"
   - button "Body"
   - button "响应"
   - text: 名称（可选，留空则用路径）
   - textbox "/api/hello"
-  - text: 200 OK 6 ms 3分钟前 手动发送 响应 Headers content-type application/json date Sat, 24 Oct 2026 07:47:26 GMT connection keep-alive keep-alive timeout=5 content-length 61 响应 Body json 61 B
+  - text: 历史响应
+  - combobox:
+    - option "#1 · 500 · 34秒前" [selected]
+    - option "#2 · 失败 · 1分钟前"
+    - option "#3 · 200 · 2分钟前"
+  - img
+  - text: 500 Internal Server Error 2 ms 34秒前 手动发送 响应 Headers content-type application/json date Sun, 25 Oct 2026 09:00:22 GMT connection keep-alive keep-alive timeout=5 content-length 16 响应 Body json 16 B
   - img
   - textbox "搜索内容"
   - button "展开全部"
@@ -111,42 +130,53 @@
     - text: 复制
   - button "收起":
     - img
-  - text: "{ \"message\": \"hello from test server\", \"token\": \"TKN-9527\", \"n\": 2 } 调用次数 2 创建时间 3分钟前 最近发送 3分钟前 最近更新 3分钟前"
-- heading "手动录入接口" [level=2]
+  - text: "{ \"error\": \"boom\" } 调用次数 3 创建时间 2分钟前 最近发送 34秒前 最近更新 34秒前"
+- heading "抓取设置" [level=2]:
+  - img
+  - text: 抓取设置
 - button:
   - img
-- button "从 curl 导入":
-  - img
-  - text: 从 curl 导入
-  - img
-- combobox:
-  - option "GET" [selected]
-  - option "POST"
-  - option "PUT"
-  - option "DELETE"
-  - option "PATCH"
-  - option "HEAD"
-  - option "OPTIONS"
 - img
-- textbox "https://api.example.com/users"
-- text: Headers
-- textbox "key"
-- textbox "value"
-- button:
+- text: 按域名自动分组 浏览器抓取的请求自动归入以「域名」命名的分组（如 api.example.com）。 仅作用于新抓取的记录，已存在的分组不受影响。
+- button "按域名自动分组 浏览器抓取的请求自动归入以「域名」命名的分组（如 api.example.com）。 仅作用于新抓取的记录，已存在的分组不受影响。"
+- img
+- text: 按完整 URL 去重 默认仅按 method+host+path 去重（忽略 query）。开启后，不同 query 参数的同接口会被视为不同接口分别记录。
+- button "按完整 URL 去重 默认仅按 method+host+path 去重（忽略 query）。开启后，不同 query 参数的同接口会被视为不同接口分别记录。"
+- img
+- text: 严格校验 TLS 证书 关闭时接受自签名 / 内网证书（默认，适合调试）；开启后会对 HTTPS 目标做证书校验，自签名证书会被拒绝。
+- button "严格校验 TLS 证书 关闭时接受自签名 / 内网证书（默认，适合调试）；开启后会对 HTTPS 目标做证书校验，自签名证书会被拒绝。"
+- text: 仅捕获这些主机
+- textbox "空 = 不过滤（全部捕获） 例如：api.example.com *.myapp.com":
+  - /placeholder: "空 = 不过滤（全部捕获）\n例如：api.example.com\n*.myapp.com"
+- text: 排除这些主机
+- textbox "例如：analytics.google.com *.adservice.com":
+  - /placeholder: "例如：analytics.google.com\n*.adservice.com"
+- img
+- text: 环境变量
+- button "新增环境":
   - img
-- button "添加一行":
-  - img
-  - text: 添加一行
-- text: Query 参数
-- textbox "param"
-- textbox "value"
-- button:
-  - img
-- button "添加一行":
-  - img
-  - text: 添加一行
-- text: Body
-- 'textbox "{ \"key\": \"value\" }"':
-  - /placeholder: "{\r\n  \"key\": \"value\"\r\n}"
-- button "取消"
-- button "保存（自动去重）" [disabled]
+  - text: 新增环境
+- button "默认"
+- paragraph:
+  - text: 当前环境「默认」变量（KEY=VALUE，可在 URL/Header/Body 中用
+  - code: "{{key}}"
+  - text: 引用）：
+- textbox "baseUrl=https://api.example.com token=xxx":
+  - /placeholder: "baseUrl=https://api.example.com\ntoken=xxx"
+- img
+- text: AI 预处理设置
+- paragraph: 配置任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义 / 智谱 / Ollama 等），批量调用里即可用 AI 把原始数据预处理成请求参数。
+- textbox "接口地址，如 https://api.openai.com/v1 或 http://127.0.0.1:11434/v1"
+- textbox "API Key（本地服务可留空）"
+- textbox "模型名，如 gpt-4o-mini / glm-4-flash"
+- img
+- text: 文件保存位置
+- paragraph: 接口记录、定时任务与设置将保存在此目录。修改后需重启应用，现有数据会自动迁移到新位置。
+- text: D:\file\github\demo-postman\gui-test-artifacts\electron-data
+- button "选择文件夹"
+- button "恢复默认"
+- button "重启应用"
+- paragraph:
+  - text: 规则同时作用于「代理」与「浏览器插件」两条抓取路径，支持
+  - code: "*.example.com"
+  - text: 通配（匹配任意子域）及精确/子域匹配。修改即时生效。

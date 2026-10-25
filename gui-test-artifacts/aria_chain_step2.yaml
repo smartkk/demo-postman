@@ -35,12 +35,9 @@
   - textbox "新文件夹名"
   - button "新建文件夹":
     - img
-  - text: 未命名链式任务 2 步
-  - button "删除":
-    - img
-  - text: 未命名链式任务 2 步
-  - button "删除":
-    - img
+  - img
+  - heading "暂无链式任务" [level=3]
+  - paragraph: 点击右上角 + 新建，把多个接口按顺序串成工作流（如先登录再调业务接口）。
 - textbox: 未命名链式任务
 - combobox:
   - option "未分组" [selected]
@@ -74,7 +71,7 @@
   - img
 - button "删除步骤":
   - img
-- text: 2 yj8ggkpe GET （未填写地址）
+- text: 2 pere7517 GET （未填写地址）
 - button "上移":
   - img
 - button "下移" [disabled]:

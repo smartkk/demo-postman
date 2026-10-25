@@ -176,6 +176,11 @@ export interface BatchCallInput {
   rows: BatchRow[];
   /** 是否串行执行（true=逐条，false=并发）。 */
   sequential?: boolean;
+  /**
+   * 参数文件夹：设置后执行时实时读取该文件夹下的文件作为参数行
+   * （按文件名顺序、每个文件一行，filesToRows 规则），忽略 rows。
+   */
+  paramFolder?: string;
 }
 
 /** 持久化的批量调用任务（「项目」）：可保存、按文件夹分组，关闭弹窗不丢失。 */
@@ -192,6 +197,11 @@ export interface BatchProject {
   folder: string; // 所属文件夹，空串表示「未分组」
   createdAt: string;
   updatedAt: string;
+  /**
+   * 参数文件夹（可选）：绑定后执行时实时读取该文件夹下的文件作为参数行，
+   * 与 rows 二选一，paramFolder 优先。AI 预处理结果默认写入这种文件夹。
+   */
+  paramFolder?: string;
   lastRunAt?: string; // 最近一次运行时间
   results?: BatchCallResult[]; // 最近一次运行结果（可选持久化）
 }

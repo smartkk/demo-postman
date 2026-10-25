@@ -94,6 +94,10 @@ export const api = {
     folder: string
   ): Promise<{ files: FolderFile[]; skipped: string[] }> =>
     window.api.readFolderFiles(folder),
+  writeParamFolder: (
+    rows: Record<string, string>[]
+  ): Promise<{ folder: string; count: number }> =>
+    window.api.writeParamFolder(rows),
   /* ── 文件保存位置 ── */
   getDataDir: (): Promise<string> => window.api.getDataDir(),
   chooseDataDir: (): Promise<string | null> => window.api.chooseDataDir(),
@@ -170,6 +174,9 @@ declare global {
       aiPreprocess: (req: { data: string; instruction?: string }) => Promise<AiPreprocessResult>;
       pickFolder: () => Promise<string | null>;
       readFolderFiles: (folder: string) => Promise<{ files: FolderFile[]; skipped: string[] }>;
+      writeParamFolder: (
+        rows: Record<string, string>[]
+      ) => Promise<{ folder: string; count: number }>;
       getDataDir: () => Promise<string>;
       chooseDataDir: () => Promise<string | null>;
       setDataDir: (dir: string) => Promise<boolean>;

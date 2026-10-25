@@ -129,6 +129,10 @@ const api = {
     folder: string
   ): Promise<{ files: FolderFile[]; skipped: string[] }> =>
     ipcRenderer.invoke('fs:readFolderFiles', folder),
+  writeParamFolder: (
+    rows: Record<string, string>[]
+  ): Promise<{ folder: string; count: number }> =>
+    ipcRenderer.invoke('fs:writeParamFolder', rows),
   getDataDir: (): Promise<string> => ipcRenderer.invoke('app:getDataDir'),
   chooseDataDir: (): Promise<string | null> =>
     ipcRenderer.invoke('app:chooseDataDir'),

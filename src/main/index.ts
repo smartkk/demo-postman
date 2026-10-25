@@ -189,7 +189,8 @@ app.whenReady().then(() => {
     () => mainWindow,
     scheduleManager,
     batchStore,
-    chainStore
+    chainStore,
+    dataDir
   );
 
   // ── 文件保存位置（可移动数据目录） ──

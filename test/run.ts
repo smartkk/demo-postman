@@ -13,12 +13,14 @@ import {
   runBatchCall,
   resolveEnvVars,
   resolvePlaceholders,
+  completeRowVars,
 } from '../src/main/request/batchRunner';
 import { parseCurl } from '../src/shared/curl';
 import {
   filesToRows,
   rowsFromAiText,
   extractJsonArray,
+  rowsToFiles,
 } from '../src/shared/params';
 import {
   matchHost,
@@ -567,6 +569,33 @@ test('filesToRows：JSON 数组文件展开为多行（同一文件多次调用�
   assert.strictEqual(rows[0].fileName, 'batch.json');
   assert.strictEqual(rows[2].fileName, 'empty.json');
   assert.strictEqual(rows[2].fileContent, '[]');
+});
+
+test('rowsToFiles：参数行写盘往返（序号命名保序，键值经 filesToRows 还原）', () => {  const rows = [
+    { id: 'A1', name: 'Alice' },
+    { id: 'B2', name: 'Bob' },
+  ];
+  const files = rowsToFiles(rows);
+  assert.deepStrictEqual(files.map((f) => f.name), ['001.json', '002.json']);
+  const back = filesToRows(files);
+  assert.strictEqual(back.length, 2, '往返行数一致');
+  assert.strictEqual(back[0].id, 'A1');
+  assert.strictEqual(back[1].name, 'Bob');
+  assert.strictEqual(back[0].fileName, '001.json', '附带文件名变量');
+  assert.ok(back[0].fileContent.includes('Alice'), '附带文件内容变量');
+});
+
+test('completeRowVars：声明过的行变量缺键补空串，未声明占位符不受影响', () => {
+  const filled = completeRowVars({ fileName: 'c.txt' }, ['id', 'name', 'fileName']);
+  assert.strictEqual(filled.id, '', '缺失的声明变量补空串');
+  assert.strictEqual(filled.name, '');
+  assert.strictEqual(filled.fileName, 'c.txt', '已有值不覆盖');
+  // 模板替换链路：{{id}} → 空串，未声明的 {{other}} 原样保留（走环境/动态解析链）
+  const r = resolvePlaceholders(
+    { method: 'GET', url: 'https://x/api?id={{id}}&o={{other}}', headers: {} },
+    filled
+  );
+  assert.strictEqual(r.url, 'https://x/api?id=&o={{other}}');
 });
 
 test('rowsFromAiText：容忍 markdown 代码块与前后说明文字，提取 JSON 数组', () => {
