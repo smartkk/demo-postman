@@ -1,8 +1,21 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { useFolderCrud } from '../hooks/useFolderCrud';
-import { X, Play, Plus, Trash2, Copy, FileJson, Upload, Save, FolderOpen } from 'lucide-react';
+import {
+  X,
+  Play,
+  Plus,
+  Trash2,
+  Copy,
+  FileJson,
+  Upload,
+  Save,
+  FolderOpen,
+  Sparkles,
+} from 'lucide-react';
 import { api } from '../api/client';
 import { Select } from './ui/Select';
+import { showToast } from './ui/Toast';
+import { filesToRows, rowsFromAiText } from '../../../shared/params';
 import type {
   BatchCallInput,
   BatchCallResult,
@@ -191,6 +204,84 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     e.target.value = '';
   };
 
+  /* ── 从文件夹导入参数：按文件名顺序，每个文件生成一行（JSON 数组文件展开为多行） ── */
+  const applyRows = (newRows: BatchRow[], prefix: string) => {
+    if (!newRows.length) {
+      showToast('没有解析出参数行', 'error');
+      return;
+    }
+    const keys = new Set<string>();
+    newRows.forEach((o) => Object.keys(o).forEach((k) => keys.add(k)));
+    setVariables([...keys]);
+    setRows(newRows);
+    showToast(
+      `${prefix}共生成 ${newRows.length} 行参数（自动附带 fileName / fileContent 变量，可在模板中引用）`,
+      'success'
+    );
+  };
+
+  const importFolderParams = async () => {
+    try {
+      const dir = await api.pickFolder();
+      if (!dir) return;
+      const { files, skipped } = await api.readFolderFiles(dir);
+      if (!files.length) {
+        showToast('文件夹中没有可读取的文本文件', 'error');
+        return;
+      }
+      applyRows(
+        filesToRows(files),
+        `已读取 ${files.length} 个文件${skipped.length ? `（跳过 ${skipped.length} 个）` : ''}，`
+      );
+    } catch (e) {
+      showToast('读取文件夹失败：' + (e instanceof Error ? e.message : String(e)), 'error');
+    }
+  };
+
+  /* ── AI 预处理：原始数据 -> 结构化参数行（OpenAI 兼容接口，在设置中配置） ── */
+  const [showAi, setShowAi] = useState(false);
+  const [aiData, setAiData] = useState('');
+  const [aiInstruction, setAiInstruction] = useState('');
+  const [aiResult, setAiResult] = useState('');
+  const [aiMeta, setAiMeta] = useState('');
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState('');
+
+  const openAiDialog = () => {
+    setAiResult('');
+    setAiMeta('');
+    setAiError('');
+    setShowAi(true);
+  };
+
+  const runAiPreprocess = async () => {
+    if (!aiData.trim()) {
+      setAiError('请先粘贴需要预处理的原始数据');
+      return;
+    }
+    setAiBusy(true);
+    setAiError('');
+    try {
+      const r = await api.aiPreprocess({ data: aiData, instruction: aiInstruction });
+      setAiResult(r.content);
+      setAiMeta(`${r.model} · ${r.durationMs}ms`);
+    } catch (e) {
+      setAiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setAiBusy(false);
+    }
+  };
+
+  const applyAiResult = () => {
+    const parsed = rowsFromAiText(aiResult);
+    if (!parsed || !parsed.length) {
+      setAiError('无法从 AI 回复中解析出 JSON 数组，可手动修改结果后重试');
+      return;
+    }
+    applyRows(parsed, 'AI 预处理完成，');
+    setShowAi(false);
+  };
+
   /* ── 保存当前配置为项目 ── */
   const buildProject = (): Omit<BatchProject, 'id' | 'createdAt' | 'updatedAt'> => ({
     name: projectName.trim() || '未命名批量任务',
@@ -319,6 +410,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   };
 
   return (
+    <>
     <div className="flex h-full min-w-0 flex-1 flex-col">
       {/* 编辑区 */}
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
@@ -358,7 +450,10 @@ export function BatchPanel({ selectedId, onClose }: Props) {
 
           <p className="mb-4 text-[12px] leading-relaxed text-slate-400">
             用一个基础请求模板，通过 <code className="text-brand-light">{'{{变量名}}'}</code>{' '}
-            占位符区分每次调用的参数。参数行单元格或模板里还可使用动态变量：
+            占位符区分每次调用的参数。参数行可来自手动输入、CSV/JSON 粘贴、
+            <code className="text-brand-light">选择文件夹</code>（按文件名顺序、每个文件一行）或
+            <code className="text-brand-light">AI 预处理</code>（在设置中配置 OpenAI 兼容接口）。
+            参数行单元格或模板里还可使用动态变量：
             <code className="text-brand-light">{'{{$timestamp}}'}</code>、<code className="text-brand-light">{'{{$datetime}}'}</code>、
             <code className="text-brand-light">{'{{$date}}'}</code>、<code className="text-brand-light">{'{{$time}}'}</code>、
             <code className="text-brand-light">{'{{$uuid}}'}</code>（每行不同）、
@@ -443,6 +538,20 @@ export function BatchPanel({ selectedId, onClose }: Props) {
                 参数行（每行 = 一次调用）
               </span>
               <div className="flex gap-2">
+                <button
+                  onClick={openAiDialog}
+                  title="用 AI 把原始数据整理成参数行（需在设置中配置 AI 接口）"
+                  className="flex items-center gap-1 rounded-md bg-brand/20 px-2 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
+                >
+                  <Sparkles size={12} /> AI 预处理
+                </button>
+                <button
+                  onClick={importFolderParams}
+                  title="选择文件夹：按文件名顺序读取其中所有文件，每个文件生成一行参数依次执行"
+                  className="flex items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700 cursor-pointer"
+                >
+                  <FolderOpen size={12} /> 选择文件夹
+                </button>
                 <label className="flex cursor-pointer items-center gap-1 rounded-md bg-slate-700/50 px-2 py-0.5 text-[11px] text-slate-300 transition hover:bg-slate-700">
                   <Upload size={12} /> 上传 CSV
                   <input
@@ -626,6 +735,121 @@ export function BatchPanel({ selectedId, onClose }: Props) {
           )}
           </div>
       </div>
+
+      {/* AI 预处理弹窗：原始数据 -> 结构化参数行 */}
+      {showAi && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm animate-fade-in"
+          onClick={() => !aiBusy && setShowAi(false)}
+        >
+          <div
+            className="glass flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex shrink-0 items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-100">
+                <Sparkles size={15} className="text-brand-light" /> AI 预处理 → 请求参数
+              </h2>
+              <button
+                onClick={() => setShowAi(false)}
+                className="cursor-pointer rounded-md p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <p className="mb-3 text-[11.5px] leading-relaxed text-slate-400">
+              粘贴任意原始数据（日志、文档、表格文本……），AI 会将其整理成{' '}
+              <code className="text-brand-light">JSON 数组</code>{' '}
+              形式的参数行，每个对象对应一次调用。接口在「设置 → AI
+              预处理设置」中配置（OpenAI 兼容）。
+            </p>
+
+            <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
+              <div>
+                <label className="mb-1 block text-[12px] text-slate-400">原始数据</label>
+                <textarea
+                  value={aiData}
+                  onChange={(e) => setAiData(e.target.value)}
+                  rows={7}
+                  placeholder={'例：\n2026-10-24 10:00 user=1001 action=login ok\n2026-10-24 10:01 user=1002 action=pay fail\n…'}
+                  className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-brand/60"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-[12px] text-slate-400">
+                  整理要求（可选，字段名请与批量模板变量一致）
+                </label>
+                <input
+                  value={aiInstruction}
+                  onChange={(e) => setAiInstruction(e.target.value)}
+                  placeholder="例：解析出 userId 与 action 两个字段，每行一条"
+                  className="w-full rounded-md border border-slate-700/50 bg-slate-800/60 px-3 py-2 text-[12.5px] text-slate-200 outline-none focus:border-brand/60"
+                />
+              </div>
+
+              {aiError && <div className="text-[12px] text-rose-400">{aiError}</div>}
+
+              {aiResult && (
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <label className="text-[12px] text-slate-400">解析结果（可手动修改）</label>
+                    {aiMeta && <span className="text-[10.5px] text-slate-500">{aiMeta}</span>}
+                  </div>
+                  <textarea
+                    value={aiResult}
+                    onChange={(e) => setAiResult(e.target.value)}
+                    rows={7}
+                    className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-brand/60"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-slate-700/40 pt-3">
+              <button
+                onClick={() => setShowAi(false)}
+                disabled={aiBusy}
+                className="rounded-lg px-4 py-2 text-[13px] text-slate-300 transition hover:bg-slate-700/50 disabled:opacity-40 cursor-pointer"
+              >
+                取消
+              </button>
+              {aiResult ? (
+                <>
+                  <button
+                    onClick={runAiPreprocess}
+                    disabled={aiBusy}
+                    className="rounded-lg border border-brand/40 px-4 py-2 text-[13px] font-medium text-brand-light transition hover:bg-brand/10 disabled:opacity-40 cursor-pointer"
+                  >
+                    重新生成
+                  </button>
+                  <button
+                    onClick={applyAiResult}
+                    disabled={aiBusy}
+                    className="rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+                  >
+                    填充到参数行
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={runAiPreprocess}
+                  disabled={aiBusy}
+                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
+                >
+                  {aiBusy ? (
+                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
+                  ) : (
+                    <Sparkles size={13} />
+                  )}
+                  {aiBusy ? '生成中…' : '生成参数'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

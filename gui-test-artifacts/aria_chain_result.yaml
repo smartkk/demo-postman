@@ -41,6 +41,9 @@
   - text: 未命名链式任务 2 步
   - button "删除":
     - img
+  - text: 未命名链式任务 2 步
+  - button "删除":
+    - img
 - textbox: 未命名链式任务
 - combobox:
   - option "未分组" [selected]
@@ -140,13 +143,13 @@
       - columnheader "提取"
       - columnheader "响应"
   - rowgroup:
-    - 'row "1 login 200 2ms token=TKN-9527 {\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":6}查看 ›"':
+    - 'row "1 login 200 3ms token=TKN-9527 {\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":24}查看 ›"':
       - cell "1"
       - cell "login"
       - cell "200"
-      - cell "2ms"
+      - cell "3ms"
       - cell "token=TKN-9527"
-      - 'cell "{\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":6}查看 ›"'
+      - 'cell "{\"message\":\"hello from test server\",\"token\":\"TKN-9527\",\"n\":24}查看 ›"'
     - 'row "2 echo 200 2ms - {\"echoed\":\"{\\\"t\\\":\\\"TKN-9527\\\"}\",\"receivedAuth\":null,\"receivedContentType\":null}查看 ›"':
       - cell "2"
       - cell "echo"

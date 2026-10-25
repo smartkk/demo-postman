@@ -1,4 +1,5 @@
 import type {
+  AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
   BatchProject,
@@ -7,6 +8,7 @@ import type {
   ChainProject,
   ChainRunResult,
   ExtensionStatus,
+  FolderFile,
   InterfaceRecord,
   ProxyStatus,
   RecordSource,
@@ -83,8 +85,15 @@ export const api = {
   toggleExtension: (): Promise<ExtensionStatus> =>
     window.api.toggleExtension(),
   getSettings: (): Promise<CaptureSettings> => window.api.getSettings(),
-  setSettings: (patch: Partial<CaptureSettings>): Promise<CaptureSettings> =>
-    window.api.setSettings(patch),
+  setSettings: (patch: Partial<CaptureSettings>) => window.api.setSettings(patch),
+  /* ── AI 预处理 & 文件夹参数 ── */
+  aiPreprocess: (req: { data: string; instruction?: string }): Promise<AiPreprocessResult> =>
+    window.api.aiPreprocess(req),
+  pickFolder: (): Promise<string | null> => window.api.pickFolder(),
+  readFolderFiles: (
+    folder: string
+  ): Promise<{ files: FolderFile[]; skipped: string[] }> =>
+    window.api.readFolderFiles(folder),
   /* ── 文件保存位置 ── */
   getDataDir: (): Promise<string> => window.api.getDataDir(),
   chooseDataDir: (): Promise<string | null> => window.api.chooseDataDir(),
@@ -158,6 +167,9 @@ declare global {
       toggleExtension: () => Promise<ExtensionStatus>;
       getSettings: () => Promise<CaptureSettings>;
       setSettings: (patch: Partial<CaptureSettings>) => Promise<CaptureSettings>;
+      aiPreprocess: (req: { data: string; instruction?: string }) => Promise<AiPreprocessResult>;
+      pickFolder: () => Promise<string | null>;
+      readFolderFiles: (folder: string) => Promise<{ files: FolderFile[]; skipped: string[] }>;
       getDataDir: () => Promise<string>;
       chooseDataDir: () => Promise<string | null>;
       setDataDir: (dir: string) => Promise<boolean>;

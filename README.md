@@ -11,6 +11,8 @@
 - **手动发送与编辑**：表单化编辑 Header / Query / Body，支持 cURL 一键导入
 - **链式请求（Chain）**：把多个接口串成工作流，上一步响应可经 JSONPath 提取后注入后续步骤（`{{stepName.field}}`），适合「登录拿 token → 调业务接口」等场景
 - **批量调用**：模板 + `{{var}}` 占位符，逐行变量替换，支持串行 / 并发
+  - **文件夹参数**：选择文件夹后按文件名顺序读取其中所有文件，每个文件生成一行参数依次执行；JSON 对象键值自动映射为变量，JSON 数组文件展开为多行，每行自动附带 `fileName` / `fileContent` 内置变量
+  - **AI 预处理**：在设置中配置任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义 / 智谱 / Ollama 等），即可把日志、文档等原始数据交给 AI 整理成结构化参数行（JSON 数组，可手动修改后填充）
 - **定时调度**：固定间隔自动调用单接口或链式任务；可指定未来首次执行时间（`startAt` 相位锚定），支持编辑、启停与执行历史查看
 - **响应查看**：超大响应自动截断并支持展开，定时 / 批量 / 链式结果均可在历史中回看
 - **抓取过滤**：按主机 include / exclude 过滤，环境变量（`{{env}}`）注入
@@ -55,7 +57,7 @@ start-dev.bat
 3. 点击任一接口可在右侧查看 / 编辑请求与最近响应；支持手动重发。
 4. **链式请求**：新建 Chain，按序添加步骤并配置 `extract`（JSONPath 提取），后续步骤用 `{{stepName.field}}` 引用。
 5. **定时调度**：新建调度，选择单接口或某个链式任务，设置间隔与可选的开始时间，保存后即可在历史上查看每次执行的状态与响应。
-6. **批量调用**：编写请求模板并填入变量行，逐行 / 并发执行。
+6. **批量调用**：编写请求模板并填入变量行，逐行 / 并发执行。参数行也可来自「选择文件夹」（按文件名顺序、每个文件一行）或「AI 预处理」（需先在 **设置 → AI 预处理设置** 中填写 OpenAI 兼容的接口地址 / API Key / 模型名，AI 会把粘贴的原始数据整理成 JSON 数组参数，可手动修改后一键填充）。
 
 ## 目录结构
 
@@ -63,13 +65,14 @@ start-dev.bat
 src/
   main/                主进程（代理、调度、IPC handlers、store）
     scheduler/         定时调度管理器（相位锚定、链式执行）
+    ai/                AI 预处理客户端（OpenAI 兼容接口）
     ipc/               IPC 处理器
   renderer/            渲染进程（React 组件）
     components/        ProxyBar / Sidebar / DetailPanel / ChainPanel / SchedulePanel ...
     lib/               格式化、文本选择等工具
     store/             接口状态
-  shared/              主 / 渲染共享类型定义
-  preload/            预加载脚本（window.api）
+  shared/              主 / 渲染共享类型定义与参数转换纯函数（params.ts）
+  preload/             预加载脚本（window.api）
 test/                  测试脚本
 ```
 

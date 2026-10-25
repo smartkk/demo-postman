@@ -40,7 +40,7 @@
     - img
   - img
   - text: 验证-自动选中-586978
-  - button "点击停用":
+  - button "点击启用":
     - img
   - button "删除":
     - img
@@ -52,6 +52,12 @@
     - img
   - img
   - text: 验证-自动选中-738232
+  - button "点击停用":
+    - img
+  - button "删除":
+    - img
+  - img
+  - text: gui-健康检查
   - button "点击停用":
     - img
   - button "删除":
@@ -74,6 +80,9 @@
   - option "GET /api/counter" [selected]
   - option "GET /api/headers"
   - option "GET /api/hello"
+  - option "GET /api/hello"
+  - option "GET /api/counter"
+  - option "GET /api/headers"
   - option "GET /api/hello"
   - option "GET /api/counter"
   - option "GET /api/headers"
@@ -107,6 +116,6 @@
 - button "立即发送":
   - img
   - text: 立即发送
-- text: 200 1ms 每 30 秒 已执行 1 次 状态 运行中
+- text: 200 3ms 每 30 秒 已执行 1 次 状态 运行中
 - img
 - text: 执行记录 暂无执行记录，保存后开始调度

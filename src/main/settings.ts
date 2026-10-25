@@ -10,6 +10,7 @@ const DEFAULTS: CaptureSettings = {
   verifyTls: false,
   environments: { 默认: {} },
   activeEnv: '默认',
+  ai: { baseUrl: '', apiKey: '', model: '' },
 };
 
 /**

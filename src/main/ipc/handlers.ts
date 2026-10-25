@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow, shell } from 'electron';
+import { ipcMain, BrowserWindow, shell, dialog } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import type { InterfaceStore } from '../storage/interfaceStore';
 import type { BatchStore } from '../storage/batchStore';
@@ -8,6 +9,7 @@ import type { ExtensionReceiver } from '../extension/extensionReceiver';
 import type { Settings } from '../settings';
 import type { ScheduleManager } from '../scheduler/scheduleManager';
 import type {
+  AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
   BatchProject,
@@ -17,6 +19,7 @@ import type {
   ChainRunResult,
   ChainStep,
   ExtensionStatus,
+  FolderFile,
   InterfaceRecord,
   ProxyStatus,
   RecordSource,
@@ -26,6 +29,7 @@ import type {
 } from '../../shared/types';
 import { AUTO_TIMEOUT_MS, sendRequest } from '../request/sender';
 import { resolveDynamic, resolveEnv, runBatchCall } from '../request/batchRunner';
+import { preprocessWithAi } from '../ai/aiClient';
 
 /** 在途请求的中断控制器（按接口 id 索引），用于「取消发送」。 */
 const inFlight = new Map<string, AbortController>();
@@ -429,4 +433,73 @@ export function registerIpc(
   settings.onChange(() => {
     getWin()?.webContents.send('settings:updated', settings.get());
   });
+
+  // ── AI 预处理：原始数据 -> 结构化请求参数（OpenAI 兼容接口） ──
+  ipcMain.handle(
+    'ai:preprocess',
+    async (
+      _e,
+      req: { data: string; instruction?: string }
+    ): Promise<AiPreprocessResult> => {
+      const ai = settings.get().ai;
+      if (!ai?.baseUrl?.trim() || !ai?.model?.trim()) {
+        throw new Error(
+          '尚未配置 AI 接口：请在「设置 → AI 预处理设置」中填写接口地址与模型'
+        );
+      }
+      return preprocessWithAi(req.data, req.instruction ?? '', ai);
+    }
+  );
+
+  // ── 文件夹参数导入（批量调用）：选择目录并读取其中的文本文件 ──
+  ipcMain.handle('fs:pickFolder', async (): Promise<string | null> => {
+    const win = getWin();
+    if (!win) return null;
+    const res = await dialog.showOpenDialog(win, {
+      title: '选择参数文件夹（每个文件作为一行参数）',
+      properties: ['openDirectory'],
+    });
+    if (res.canceled || !res.filePaths.length) return null;
+    return res.filePaths[0];
+  });
+
+  // 单文件读取上限 1MB、最多 200 个：参数文件远用不到这么大，
+  // 超限直接跳过并在结果中标注，避免把大日志/二进制整进内存。
+  const MAX_FILE_BYTES = 1024 * 1024;
+  const MAX_FILES = 200;
+  ipcMain.handle(
+    'fs:readFolderFiles',
+    (_e, folder: string): { files: FolderFile[]; skipped: string[] } => {
+      const files: FolderFile[] = [];
+      const skipped: string[] = [];
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(folder, { withFileTypes: true });
+      } catch (err) {
+        throw new Error('无法读取文件夹：' + (err instanceof Error ? err.message : String(err)));
+      }
+      const names = entries
+        .filter((d) => d.isFile())
+        .map((d) => d.name)
+        .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      for (const name of names) {
+        if (files.length >= MAX_FILES) {
+          skipped.push(`${name}（超出数量上限 ${MAX_FILES}）`);
+          continue;
+        }
+        const full = path.join(folder, name);
+        try {
+          const size = fs.statSync(full).size;
+          if (size > MAX_FILE_BYTES) {
+            skipped.push(`${name}（超过 1MB）`);
+            continue;
+          }
+          files.push({ name, content: fs.readFileSync(full, 'utf8') });
+        } catch (err) {
+          skipped.push(`${name}（读取失败）`);
+        }
+      }
+      return { files, skipped };
+    }
+  );
 }

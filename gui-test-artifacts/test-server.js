@@ -20,6 +20,24 @@ const server = http.createServer((req, res) => {
       ua: req.headers['user-agent'] || null,
     });
     const u = new URL(req.url, 'http://x');
+    // Mock OpenAI 兼容端点：供 AI 预处理 GUI 验证（无需真实外部服务）
+    if (u.pathname === '/v1/chat/completions') {
+      res.end(JSON.stringify({
+        id: 'chatcmpl-mock',
+        object: 'chat.completion',
+        model: JSON.parse(body).model || 'mock-model',
+        choices: [{
+          index: 0,
+          message: {
+            role: 'assistant',
+            content: '好的，结果如下：\n```json\n[{"id":"A1","name":"Alice"},{"id":"B2","name":"Bob"}]\n```',
+          },
+          finish_reason: 'stop',
+        }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      }));
+      return;
+    }
     res.setHeader('content-type', 'application/json');
     if (u.pathname === '/api/hello') {
       res.end(JSON.stringify({ message: 'hello from test server', token: 'TKN-9527', n: counter }));

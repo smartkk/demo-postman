@@ -38,6 +38,9 @@
   - text: 未命名链式任务 2 步
   - button "删除":
     - img
+  - text: 未命名链式任务 2 步
+  - button "删除":
+    - img
 - textbox: 未命名链式任务
 - combobox:
   - option "未分组" [selected]
@@ -71,7 +74,7 @@
   - img
 - button "删除步骤":
   - img
-- text: 2 mxov4xv8 GET （未填写地址）
+- text: 2 yj8ggkpe GET （未填写地址）
 - button "上移":
   - img
 - button "下移" [disabled]:

@@ -50,7 +50,11 @@
 - paragraph:
   - text: 用一个基础请求模板，通过
   - code: "{{变量名}}"
-  - text: 占位符区分每次调用的参数。参数行单元格或模板里还可使用动态变量：
+  - text: 占位符区分每次调用的参数。参数行可来自手动输入、CSV/JSON 粘贴、
+  - code: 选择文件夹
+  - text: （按文件名顺序、每个文件一行）或
+  - code: AI 预处理
+  - text: （在设置中配置 OpenAI 兼容接口）。 参数行单元格或模板里还可使用动态变量：
   - code: "{{$timestamp}}"
   - text: 、
   - code: "{{$datetime}}"
@@ -90,6 +94,12 @@
 - button [disabled]:
   - img
 - text: 参数行（每行 = 一次调用）
+- button "AI 预处理":
+  - img
+  - text: AI 预处理
+- button "选择文件夹":
+  - img
+  - text: 选择文件夹
 - img
 - text: 上传 CSV
 - button "粘贴 JSON/CSV":
@@ -135,17 +145,17 @@
       - columnheader "变量值"
       - columnheader "响应"
   - rowgroup:
-    - 'row "1 0秒前 200 1ms id=1 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
+    - 'row "1 0秒前 200 4ms id=1 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
       - cell "1"
       - cell "0秒前"
       - cell "200"
-      - cell "1ms"
+      - cell "4ms"
       - cell "id=1"
       - 'cell "{\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"'
-    - 'row "2 0秒前 200 2ms id=2 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
+    - 'row "2 0秒前 200 1ms id=2 {\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"':
       - cell "2"
       - cell "0秒前"
       - cell "200"
-      - cell "2ms"
+      - cell "1ms"
       - cell "id=2"
       - 'cell "{\"echoed\":\"\",\"receivedAuth\":null,\"receivedContentType\":null}"'

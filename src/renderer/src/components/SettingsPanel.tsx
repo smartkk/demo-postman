@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X, Filter, FolderTree, Layers, Plus } from 'lucide-react';
+import { X, Filter, FolderTree, Layers, Plus, Sparkles } from 'lucide-react';
 import type { CaptureSettings } from '../../../shared/types';
 import { api } from '../api/client';
 
@@ -50,6 +50,18 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
   const commitExclude = (v: string) => {
     setExcludeText(v);
     onChange({ excludeHosts: parseList(v) });
+  };
+
+  // ── AI 预处理设置（本地受控，输入即时生效） ──
+  const ai = settings.ai || { baseUrl: '', apiKey: '', model: '' };
+  const [aiBaseUrl, setAiBaseUrl] = useState(ai.baseUrl);
+  const [aiApiKey, setAiApiKey] = useState(ai.apiKey);
+  const [aiModel, setAiModel] = useState(ai.model);
+  const commitAi = (patch: Partial<{ baseUrl: string; apiKey: string; model: string }>) => {
+    if ('baseUrl' in patch) setAiBaseUrl(patch.baseUrl!);
+    if ('apiKey' in patch) setAiApiKey(patch.apiKey!);
+    if ('model' in patch) setAiModel(patch.model!);
+    onChange({ ai: { ...ai, ...patch } });
   };
 
   // 环境变量文本用本地状态受控，避免「输入行缺少 = 时被 parseEnv 清空」导致无法编辑；
@@ -305,6 +317,39 @@ export function SettingsPanel({ settings, onChange, onClose }: Props) {
               placeholder={'baseUrl=https://api.example.com\ntoken=xxx'}
               className="h-[88px] w-full resize-none rounded-lg border border-slate-700/50 bg-slate-800/40 p-2.5 font-mono text-[12px] text-slate-200 outline-none transition focus:border-brand/60"
             />
+          </div>
+
+          <div className="rounded-xl bg-slate-800/40 p-3">
+            <div className="mb-2 flex items-center gap-1.5 text-[13px] font-medium text-slate-200">
+              <Sparkles size={13} className="text-brand-light" /> AI 预处理设置
+            </div>
+            <p className="mb-2 text-[11px] leading-relaxed text-slate-500">
+              配置任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义 / 智谱 / Ollama
+              等），批量调用里即可用 AI 把原始数据预处理成请求参数。
+            </p>
+            <div className="space-y-2">
+              <input
+                value={aiBaseUrl}
+                onChange={(e) => commitAi({ baseUrl: e.target.value })}
+                placeholder="接口地址，如 https://api.openai.com/v1 或 http://127.0.0.1:11434/v1"
+                className="w-full rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-1.5 text-[12px] text-slate-200 outline-none transition focus:border-brand/60"
+              />
+              <div className="flex gap-2">
+                <input
+                  value={aiApiKey}
+                  type="password"
+                  onChange={(e) => commitAi({ apiKey: e.target.value })}
+                  placeholder="API Key（本地服务可留空）"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-1.5 text-[12px] text-slate-200 outline-none transition focus:border-brand/60"
+                />
+                <input
+                  value={aiModel}
+                  onChange={(e) => commitAi({ model: e.target.value })}
+                  placeholder="模型名，如 gpt-4o-mini / glm-4-flash"
+                  className="w-[46%] shrink-0 rounded-lg border border-slate-700/50 bg-slate-800/60 px-2.5 py-1.5 text-[12px] text-slate-200 outline-none transition focus:border-brand/60"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="rounded-xl bg-slate-800/40 p-3">

@@ -26,6 +26,34 @@ export interface CaptureSettings {
   environments?: Record<string, Record<string, string>>;
   /** 当前激活的环境名。 */
   activeEnv?: string;
+  /** AI 预处理设置：任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义 / 智谱 / Ollama 等）。 */
+  ai?: AiSettings;
+}
+
+/** AI 预处理接口配置。 */
+export interface AiSettings {
+  /** 接口基础地址，如 https://api.openai.com/v1、https://open.bigmodel.cn/api/paas/v4 或 http://127.0.0.1:11434/v1。 */
+  baseUrl: string;
+  /** API Key；本地服务（如 Ollama）可留空。 */
+  apiKey: string;
+  /** 模型名，如 gpt-4o-mini、deepseek-chat、glm-4-flash、qwen-plus。 */
+  model: string;
+}
+
+/** 参数文件夹中的一个文本文件。 */
+export interface FolderFile {
+  /** 文件名（不含路径）。 */
+  name: string;
+  /** UTF-8 文本内容。 */
+  content: string;
+}
+
+/** AI 预处理调用结果。 */
+export interface AiPreprocessResult {
+  /** 模型返回的原始文本（应包含 JSON 数组形式的参数行）。 */
+  content: string;
+  model: string;
+  durationMs: number;
 }
 
 export interface InterfaceRecord {

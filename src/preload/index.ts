@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
+  AiPreprocessResult,
   BatchCallInput,
   BatchCallResult,
   BatchProject,
@@ -8,6 +9,7 @@ import type {
   ChainProject,
   ChainRunResult,
   ExtensionStatus,
+  FolderFile,
   InterfaceRecord,
   ProxyStatus,
   RecordSource,
@@ -119,6 +121,14 @@ const api = {
     ipcRenderer.invoke('settings:get'),
   setSettings: (patch: Partial<CaptureSettings>): Promise<CaptureSettings> =>
     ipcRenderer.invoke('settings:set', patch),
+  /* ── AI 预处理 & 文件夹参数 ── */
+  aiPreprocess: (req: { data: string; instruction?: string }): Promise<AiPreprocessResult> =>
+    ipcRenderer.invoke('ai:preprocess', req),
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('fs:pickFolder'),
+  readFolderFiles: (
+    folder: string
+  ): Promise<{ files: FolderFile[]; skipped: string[] }> =>
+    ipcRenderer.invoke('fs:readFolderFiles', folder),
   getDataDir: (): Promise<string> => ipcRenderer.invoke('app:getDataDir'),
   chooseDataDir: (): Promise<string | null> =>
     ipcRenderer.invoke('app:chooseDataDir'),

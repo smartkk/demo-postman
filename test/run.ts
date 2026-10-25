@@ -16,6 +16,11 @@ import {
 } from '../src/main/request/batchRunner';
 import { parseCurl } from '../src/shared/curl';
 import {
+  filesToRows,
+  rowsFromAiText,
+  extractJsonArray,
+} from '../src/shared/params';
+import {
   matchHost,
   shouldCapture,
   hostnameOf,
@@ -531,6 +536,52 @@ test('InterfaceStore 导出/导入集合', () => {
   assert.strictEqual(s2.list()[0].host, 'api.test');
   fs.rmSync(f, { force: true });
   fs.rmSync(f2, { force: true });
+});
+
+console.log('\n=== AI 预处理与文件夹参数转换（新增能力测试） ===');
+
+test('filesToRows：JSON 对象文件映射键值，文本文件进 fileContent，均附 fileName/fileContent', () => {
+  const rows = filesToRows([
+    { name: 'a.json', content: '{"id":"1","name":"张三","extra":{"k":1}}' },
+    { name: 'b.txt', content: 'raw text\nline2' },
+    { name: 'c.json', content: 'not json {' },
+  ]);
+  assert.strictEqual(rows.length, 3, '非数组文件每个一行');
+  assert.strictEqual(rows[0].id, '1');
+  assert.strictEqual(rows[0].name, '张三');
+  assert.strictEqual(rows[0].extra, '{"k":1}', '嵌套对象序列化为 JSON 字符串');
+  assert.strictEqual(rows[0].fileName, 'a.json');
+  assert.strictEqual(rows[1].fileContent, 'raw text\nline2');
+  assert.strictEqual(rows[1].fileName, 'b.txt');
+  assert.strictEqual(rows[2].fileContent, 'not json {', '非法 JSON 原样保留');
+});
+
+test('filesToRows：JSON 数组文件展开为多行（同一文件多次调用）', () => {
+  const rows = filesToRows([
+    { name: 'batch.json', content: '[{"id":"3"},{"id":"4","name":"李四"}]' },
+    { name: 'empty.json', content: '[]' },
+  ]);
+  assert.strictEqual(rows.length, 3, '数组 2 行 + 空数组保底 1 行');
+  assert.strictEqual(rows[0].id, '3');
+  assert.strictEqual(rows[1].name, '李四');
+  assert.strictEqual(rows[0].fileName, 'batch.json');
+  assert.strictEqual(rows[2].fileName, 'empty.json');
+  assert.strictEqual(rows[2].fileContent, '[]');
+});
+
+test('rowsFromAiText：容忍 markdown 代码块与前后说明文字，提取 JSON 数组', () => {
+  const r1 = rowsFromAiText(
+    '好的，以下是整理结果：\n```json\n[{"userId":"u1","action":"login"},{"userId":"u2","action":"pay"}]\n```\n如需调整请告诉我。'
+  );
+  assert.ok(r1, '代码块包裹应可解析');
+  assert.strictEqual(r1!.length, 2);
+  assert.strictEqual(r1![1].userId, 'u2');
+  const r2 = rowsFromAiText('结果如下 [{"id":"9"}] 完毕');
+  assert.ok(r2 && r2[0].id === '9', '裸数组 + 前后文字应可解析');
+  const r3 = rowsFromAiText('[]');
+  assert.ok(r3 && r3.length === 0, '空数组返回空行列表');
+  assert.strictEqual(rowsFromAiText('没有任何 JSON 内容'), null, '无数组应返回 null');
+  assert.strictEqual(extractJsonArray('{"a":1}'), null, '对象不是数组应返回 null');
 });
 
 console.log('\n=== 索引与去重一致性专项（P1-3 / P1-4 / P1-5 / P1-9）===');
