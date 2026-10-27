@@ -5,7 +5,8 @@ let pass = 0;
 let fail = 0;
 const check = (name: string, ok: boolean, detail?: string) => {
   console.log(`${ok ? '  ✓' : '  ✗'} ${name}${detail ? ' — ' + detail : ''}`);
-  ok ? pass++ : fail++;
+  if (ok) pass++;
+  else fail++;
 };
 
 async function main() {

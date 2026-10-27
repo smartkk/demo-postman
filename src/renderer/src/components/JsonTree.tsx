@@ -34,6 +34,9 @@ interface NodeProps {
 }
 
 function JsonNode({ name, value, depth, isLast, defaultExpandDepth, expandAll }: NodeProps) {
+  // Hooks 必须先于任何早退分支无条件执行（原始值分支用不到 open，但调用顺序需一致）
+  const [open, setOpen] = useState(expandAll || depth < defaultExpandDepth);
+
   if (!isContainer(value)) {
     return (
       <div className="json-line">
@@ -47,7 +50,6 @@ function JsonNode({ name, value, depth, isLast, defaultExpandDepth, expandAll }:
   }
 
   const isArray = Array.isArray(value);
-  const [open, setOpen] = useState(expandAll || depth < defaultExpandDepth);
   const entries = isArray
     ? (value as Json[]).map((v, i) => ({ key: String(i), value: v }))
     : Object.entries(value as Record<string, Json>).map(([k, v]) => ({ key: k, value: v }));

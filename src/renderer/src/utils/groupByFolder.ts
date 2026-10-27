@@ -1,8 +1,8 @@
-import type { InterfaceRecord } from '../../../shared/types';
+import type { InterfaceSummary } from '../../../shared/types';
 
 export interface FolderBuckets {
   /** folder -> 该分组下的记录（顺序与输入一致） */
-  buckets: Map<string, InterfaceRecord[]>;
+  buckets: Map<string, InterfaceSummary[]>;
   /** 抓取来源（source==='captured'）的记录总数 */
   capturedCount: number;
 }
@@ -14,8 +14,8 @@ export interface FolderBuckets {
  * 复杂度 O(分组数 × 记录数)；这里单次遍历 O(记录数) 即可，
  * 记录上千后配合抓取时的高频更新开销差异明显。抽成纯函数便于单测。
  */
-export function buildFolderBuckets(records: InterfaceRecord[]): FolderBuckets {
-  const buckets = new Map<string, InterfaceRecord[]>();
+export function buildFolderBuckets(records: InterfaceSummary[]): FolderBuckets {
+  const buckets = new Map<string, InterfaceSummary[]>();
   let capturedCount = 0;
   for (const it of records) {
     if (it.source === 'captured') capturedCount += 1;

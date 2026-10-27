@@ -5,7 +5,6 @@ import {
   Play,
   Plus,
   Trash2,
-  Copy,
   FileJson,
   Upload,
   Save,
@@ -21,26 +20,16 @@ import {
 import { api } from '../api/client';
 import { Select } from './ui/Select';
 import { showToast } from './ui/Toast';
-import { filesToRows, rowsFromAiText } from '../../../shared/params';
+import { filesToRows } from '../../../shared/params';
+import { BatchResultSection } from './BatchResultSection';
+import { AiPreprocessDialog } from './AiPreprocessDialog';
 import type {
-  BatchCallInput,
   BatchCallResult,
   BatchProject,
   BatchRow,
   BatchProgressState,
-  InterfaceRecord,
+  InterfaceSummary,
 } from '../../../shared/types';
-import { relTime } from './method';
-
-/* ── 模块级纯函数：结果状态徽章（置于组件外，便于 memo 表复用且无闭包依赖） ── */
-function makeStatusBadge(r: BatchCallResult): { text: string; cls: string } {
-  if (r.error) return { text: '错误', cls: 'bg-red-500/20 text-red-400' };
-  if (r.status >= 200 && r.status < 400)
-    return { text: `${r.status}`, cls: 'bg-emerald-500/20 text-emerald-400' };
-  if (r.status >= 400)
-    return { text: `${r.status}`, cls: 'bg-yellow-500/20 text-yellow-400' };
-  return { text: `${r.status}`, cls: 'bg-slate-700 text-slate-400' };
-}
 
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
@@ -69,7 +58,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const [error, setError] = useState('');
 
   // 已记录的接口（历史接口）：可导入为基础请求，导入后仍可继续手动修改
-  const [localRecords, setLocalRecords] = useState<InterfaceRecord[]>([]);
+  const [localRecords, setLocalRecords] = useState<InterfaceSummary[]>([]);
   const [showLocal, setShowLocal] = useState(false);
   const [localKw, setLocalKw] = useState('');
   const [sourceId, setSourceId] = useState<string | null>(null);
@@ -78,14 +67,11 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const [rowsCollapsed, setRowsCollapsed] = useState(false);
   const [rowKw, setRowKw] = useState('');
 
-  // 结果区：折叠 + 成功/失败过滤 + 按参数/响应搜索
-  const [resultCollapsed, setResultCollapsed] = useState(false);
-  const [statusFilter, setStatusFilter] = useState<'all' | 'ok' | 'fail'>('all');
-  const [resultKw, setResultKw] = useState('');
-
   // 执行进度与暂停：结果流式返回，暂停可中断后续请求
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [stopped, setStopped] = useState(false);
+  /** 每轮运行自增：驱动结果区在新一轮执行时自动展开（见 BatchResultSection） */
+  const [runSeq, setRunSeq] = useState(0);
   const runIdRef = useRef('');
 
   // 断点续跑：记录本轮已完成的原始行号（参数行内容变化则失效）
@@ -97,8 +83,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     null
   );
 
-  // ── 持久化：已保存的批量项目 & 文件夹 ──
-  const [projects, setProjects] = useState<BatchProject[]>([]);
+  // ── 持久化：文件夹分组 ──
   const { folders, setFolders } = useFolderCrud({
     listFolders: api.listBatchFolders,
     createFolder: api.createBatchFolder,
@@ -108,18 +93,20 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   const [folder, setFolder] = useState('');
 
   const refreshList = useCallback(async () => {
-    const [list, f] = await Promise.all([api.listBatches(), api.listBatchFolders()]);
-    setProjects(list);
+    const f = await api.listBatchFolders();
     setFolders(f);
+    // setFolders 来自 useState，引用稳定，无需作为依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     refreshList();
-    const off = api.onBatches((list, f) => {
-      setProjects(list);
+    const off = api.onBatches((_list, f) => {
       setFolders(f);
     });
     return off;
+    // setFolders 引用稳定；refreshList 已覆盖文件夹刷新路径
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshList]);
 
   // 加载已记录的接口，供「选择历史接口」
@@ -329,76 +316,29 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setFolderInfo(null);
   };
 
-  /* ── AI 预处理：原始数据 -> 结构化参数行（OpenAI 兼容接口，在设置中配置） ── */
+  /* ── AI 预处理：弹窗与交互在 AiPreprocessDialog，这里只保留落地动作 ── */
   const [showAi, setShowAi] = useState(false);
-  const [aiData, setAiData] = useState('');
-  const [aiInstruction, setAiInstruction] = useState('');
-  const [aiResult, setAiResult] = useState('');
-  const [aiMeta, setAiMeta] = useState('');
-  const [aiBusy, setAiBusy] = useState(false);
-  const [aiError, setAiError] = useState('');
 
-  const openAiDialog = () => {
-    setAiResult('');
-    setAiMeta('');
-    setAiError('');
-    setShowAi(true);
-  };
-
-  const runAiPreprocess = async () => {
-    if (!aiData.trim()) {
-      setAiError('请先粘贴需要预处理的原始数据');
-      return;
-    }
-    setAiBusy(true);
-    setAiError('');
-    try {
-      const r = await api.aiPreprocess({ data: aiData, instruction: aiInstruction });
-      setAiResult(r.content);
-      setAiMeta(`${r.model} · ${r.durationMs}ms`);
-    } catch (e) {
-      setAiError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setAiBusy(false);
-    }
-  };
-
-  const applyAiResult = () => {
-    const parsed = rowsFromAiText(aiResult);
-    if (!parsed || !parsed.length) {
-      setAiError('无法从 AI 回复中解析出 JSON 数组，可手动修改结果后重试');
-      return;
-    }
-    // 手动行模式：解除文件夹绑定，避免执行时仍走旧文件夹
+  /** 填充到参数行：手动行模式下解除文件夹绑定，避免执行时仍走旧文件夹。 */
+  const applyAiRows = (parsed: BatchRow[]) => {
     unbindFolder();
     applyRows(parsed, 'AI 预处理完成，');
-    setShowAi(false);
   };
 
-  /** 默认路径：AI 结果写入参数文件夹（每行一个文件）并绑定，执行时实时读取发送 */
-  const applyAiResultToFolder = async () => {
-    const parsed = rowsFromAiText(aiResult);
-    if (!parsed || !parsed.length) {
-      setAiError('无法从 AI 回复中解析出 JSON 数组，可手动修改结果后重试');
-      return;
-    }
-    try {
-      const { folder, count } = await api.writeParamFolder(parsed);
-      await loadFolderInfo(folder);
-      setParamFolder(folder);
-      setShowAi(false);
-      showToast(
-        `AI 结果已写入参数文件夹（${count} 个文件）并绑定，执行时按顺序依次读取发送`,
-        'success'
-      );
-    } catch (e) {
-      setAiError('写入参数文件夹失败：' + (e instanceof Error ? e.message : String(e)));
-    }
+  /** 默认路径：AI 结果写入参数文件夹（每行一个文件）并绑定，执行时实时读取发送。 */
+  const writeAiRowsToFolder = async (parsed: BatchRow[]) => {
+    const { folder, count } = await api.writeParamFolder(parsed);
+    await loadFolderInfo(folder);
+    setParamFolder(folder);
+    showToast(
+      `AI 结果已写入参数文件夹（${count} 个文件）并绑定，执行时按顺序依次读取发送`,
+      'success'
+    );
   };
 
   /* ── 历史接口：导入为基础请求 ── */
   /** 把历史接口还原成完整 URL（base url + query）。 */
-  const fullUrlOf = (rec: InterfaceRecord) => {
+  const fullUrlOf = (rec: InterfaceSummary) => {
     const qs = Object.entries(rec.query || {})
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join('&');
@@ -406,7 +346,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
   };
 
   /** 选中历史接口：填充 method/url/headers/body，之后仍可手动改成自定义请求。 */
-  const importFromLocal = (rec: InterfaceRecord) => {
+  const importFromLocal = (rec: InterfaceSummary) => {
     setMethod((rec.method || 'GET').toUpperCase());
     setUrl(fullUrlOf(rec));
     setHeaders({ ...(rec.headers || {}) });
@@ -552,7 +492,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
       doneIdxRef.current = new Set();
     }
     setProgress({ done: doneIdxRef.current.size, total: rows.length });
-    setResultCollapsed(false);
+    setRunSeq((n) => n + 1);
 
     /** 合并一条结果：续跑时保留上一轮已完成的行（同时镜像到 ref 供结束时落盘） */
     const mergeResult = (list: BatchCallResult[], r: BatchCallResult) => {
@@ -660,12 +600,6 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     setProgress(null);
   };
 
-  const deleteProject = async (id: string) => {
-    await api.deleteBatch(id);
-    if (activeId === id) newProject();
-    await refreshList();
-  };
-
   // 来源历史接口的展示名（记录列表加载完成后才能确定是否已删除）
   const sourceRec = localRecords.find((r) => r.id === sourceId);
   const sourceLabel = sourceRec
@@ -673,12 +607,6 @@ export function BatchPanel({ selectedId, onClose }: Props) {
     : localRecords.length > 0
       ? '（接口已删除）'
       : '';
-
-  const statusBadge = makeStatusBadge;
-
-  /** 是否成功：2xx/3xx 且无错误（与统计口径一致）。 */
-  const isOkResult = (r: BatchCallResult) =>
-    !r.error && r.status >= 200 && r.status < 400;
 
   /* ── 参数行搜索：按「变量名=值」匹配，保留原始行下标以便继续编辑/删除 ── */
   const rowKwLower = rowKw.trim().toLowerCase();
@@ -691,26 +619,6 @@ export function BatchPanel({ selectedId, onClose }: Props) {
           return variables.some((v) => `${v}=${r[v] ?? ''}`.toLowerCase().includes(rowKwLower));
         }),
     [rows, rowKwLower, variables]
-  );
-
-  /* ── 结果过滤：成功/失败 + 按参数值/状态码/响应内容搜索 ── */
-  const resultKwLower = resultKw.trim().toLowerCase();
-  const okCount = (results ?? []).filter(isOkResult).length;
-  const failCount = (results ?? []).length - okCount;
-  const visibleResults = useMemo(
-    () =>
-      (results ?? []).filter((r) => {
-        if (statusFilter === 'ok' && !isOkResult(r)) return false;
-        if (statusFilter === 'fail' && isOkResult(r)) return false;
-        if (!resultKwLower) return true;
-        return (
-          variables.some((v) => `${v}=${r.vars?.[v] ?? ''}`.toLowerCase().includes(resultKwLower)) ||
-          `${r.status} ${r.statusText ?? ''} ${r.error ?? ''} ${r.body ?? ''}`
-            .toLowerCase()
-            .includes(resultKwLower)
-        );
-      }),
-    [results, resultKwLower, statusFilter, variables]
   );
 
   return (
@@ -941,7 +849,7 @@ export function BatchPanel({ selectedId, onClose }: Props) {
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  onClick={openAiDialog}
+                  onClick={() => setShowAi(true)}
                   title="用 AI 把原始数据整理成参数行（需在设置中配置 AI 接口）"
                   className="flex items-center gap-1 rounded-md bg-brand/20 px-2 py-0.5 text-[11px] text-brand-light transition hover:bg-brand/30 cursor-pointer"
                 >
@@ -1184,222 +1092,24 @@ export function BatchPanel({ selectedId, onClose }: Props) {
             </div>
           </div>
 
-          {/* 结果 */}
-          {results && (
-            <div className="mt-4">
-              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    onClick={() => setResultCollapsed((v) => !v)}
-                    title={resultCollapsed ? '展开结果' : '折叠结果'}
-                    className="rounded p-0.5 text-slate-400 transition hover:bg-slate-700/60 hover:text-slate-200 cursor-pointer"
-                  >
-                    {resultCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
-                  </button>
-                  <span className="text-[12px] font-medium text-slate-400">
-                    执行结果（{results.length} 次，{okCount} 成功 / {failCount} 失败
-                    {resultKw.trim() || statusFilter !== 'all'
-                      ? `，显示 ${visibleResults.length} 条`
-                      : ''}
-                    ）
-                  </span>
-                </div>
-
-                {!resultCollapsed && (
-                  <div className="flex flex-wrap items-center gap-2">
-                    {/* 成功/失败过滤 */}
-                    <div className="flex items-center gap-1 rounded-md bg-slate-700/40 p-0.5">
-                      {(
-                        [
-                          ['all', `全部 ${results.length}`],
-                          ['ok', `成功 ${okCount}`],
-                          ['fail', `失败 ${failCount}`],
-                        ] as const
-                      ).map(([key, label]) => (
-                        <button
-                          key={key}
-                          onClick={() => setStatusFilter(key)}
-                          title={`只看${label.split(' ')[0]}的请求`}
-                          className={`rounded px-2 py-0.5 text-[11px] transition cursor-pointer ${
-                            statusFilter === key
-                              ? 'bg-brand/30 text-brand-light'
-                              : 'text-slate-400 hover:bg-slate-700/60 hover:text-slate-200'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    <div className="relative">
-                      <Search
-                        size={12}
-                        className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500"
-                      />
-                      <input
-                        value={resultKw}
-                        onChange={(e) => setResultKw(e.target.value)}
-                        placeholder="搜索结果（参数/状态码/响应）"
-                        className="w-48 rounded-md border border-slate-700/50 bg-slate-800/40 py-1 pl-7 pr-2 text-[11px] text-slate-200 outline-none focus:border-brand/60"
-                      />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {!resultCollapsed && (
-              <div className="max-h-[360px] overflow-auto rounded-lg border border-slate-700/40">
-                <table className="w-full text-[11.5px]">
-                  <thead>
-                    <tr className="sticky top-0 z-10 border-b border-slate-700/50 bg-slate-900/95 text-slate-400">
-                      <th className="px-2 py-1.5 text-left font-medium">#</th>
-                      <th className="px-2 py-1.5 text-left font-medium">发送时间</th>
-                      <th className="px-2 py-1.5 text-left font-medium">状态</th>
-                      <th className="px-2 py-1.5 text-right font-medium">耗时</th>
-                      <th className="px-2 py-1.5 text-left font-medium">变量值</th>
-                      <th className="px-2 py-1.5 text-left font-medium">响应</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <ResultTable results={visibleResults} variables={variables} />
-                    {visibleResults.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="py-4 text-center text-slate-500">
-                          {running && !stopped
-                            ? '执行中，等待请求返回…'
-                            : '没有符合当前筛选条件的结果'}
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              )}
-            </div>
-          )}
+          {/* 结果（统计 / 过滤 / 搜索 / 表格，见 BatchResultSection） */}
+          <BatchResultSection
+            results={results}
+            variables={variables}
+            running={running}
+            stopped={stopped}
+            runSeq={runSeq}
+          />
           </div>
       </div>
 
       {/* AI 预处理弹窗：原始数据 -> 结构化参数行 */}
-      {showAi && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm animate-fade-in"
-          onClick={() => !aiBusy && setShowAi(false)}
-        >
-          <div
-            className="glass flex max-h-[90vh] w-full max-w-2xl flex-col rounded-2xl p-5 shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex shrink-0 items-center justify-between">
-              <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-100">
-                <Sparkles size={15} className="text-brand-light" /> AI 预处理 → 请求参数
-              </h2>
-              <button
-                onClick={() => setShowAi(false)}
-                className="cursor-pointer rounded-md p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200"
-              >
-                <X size={16} />
-              </button>
-            </div>
-
-            <p className="mb-3 text-[11.5px] leading-relaxed text-slate-400">
-              粘贴任意原始数据（日志、文档、表格文本……），AI 会将其整理成{' '}
-              <code className="text-brand-light">JSON 数组</code>{' '}
-              形式的参数。默认「写入参数文件夹并绑定」：每行参数存为一个文件，执行时按文件名顺序实时读取依次发送；
-              也可「填充到参数行」手动编辑。接口在「设置 → AI
-              预处理设置」中配置（OpenAI 兼容）。
-            </p>
-
-            <div className="min-h-0 flex-1 space-y-2.5 overflow-y-auto pr-1">
-              <div>
-                <label className="mb-1 block text-[12px] text-slate-400">原始数据</label>
-                <textarea
-                  value={aiData}
-                  onChange={(e) => setAiData(e.target.value)}
-                  rows={7}
-                  placeholder={'例：\n2026-10-24 10:00 user=1001 action=login ok\n2026-10-24 10:01 user=1002 action=pay fail\n…'}
-                  className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-brand/60"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-[12px] text-slate-400">
-                  整理要求（可选，字段名请与批量模板变量一致）
-                </label>
-                <input
-                  value={aiInstruction}
-                  onChange={(e) => setAiInstruction(e.target.value)}
-                  placeholder="例：解析出 userId 与 action 两个字段，每行一条"
-                  className="w-full rounded-md border border-slate-700/50 bg-slate-800/60 px-3 py-2 text-[12.5px] text-slate-200 outline-none focus:border-brand/60"
-                />
-              </div>
-
-              {aiError && <div className="text-[12px] text-rose-400">{aiError}</div>}
-
-              {aiResult && (
-                <div>
-                  <div className="mb-1 flex items-center justify-between">
-                    <label className="text-[12px] text-slate-400">解析结果（可手动修改）</label>
-                    {aiMeta && <span className="text-[10.5px] text-slate-500">{aiMeta}</span>}
-                  </div>
-                  <textarea
-                    value={aiResult}
-                    onChange={(e) => setAiResult(e.target.value)}
-                    rows={7}
-                    className="w-full resize-none rounded-md border border-slate-700/50 bg-slate-900/60 px-3 py-2 font-mono text-[12px] text-slate-200 outline-none focus:border-brand/60"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="mt-3 flex shrink-0 items-center justify-end gap-2 border-t border-slate-700/40 pt-3">
-              <button
-                onClick={() => setShowAi(false)}
-                disabled={aiBusy}
-                className="rounded-lg px-4 py-2 text-[13px] text-slate-300 transition hover:bg-slate-700/50 disabled:opacity-40 cursor-pointer"
-              >
-                取消
-              </button>
-              {aiResult ? (
-                <>
-                  <button
-                    onClick={runAiPreprocess}
-                    disabled={aiBusy}
-                    className="rounded-lg border border-brand/40 px-4 py-2 text-[13px] font-medium text-brand-light transition hover:bg-brand/10 disabled:opacity-40 cursor-pointer"
-                  >
-                    重新生成
-                  </button>
-                  <button
-                    onClick={applyAiResult}
-                    disabled={aiBusy}
-                    className="rounded-lg border border-slate-600/60 px-4 py-2 text-[13px] font-medium text-slate-300 transition hover:bg-slate-700/50 disabled:opacity-40 cursor-pointer"
-                  >
-                    填充到参数行
-                  </button>
-                  <button
-                    onClick={applyAiResultToFolder}
-                    disabled={aiBusy}
-                    className="rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
-                  >
-                    写入参数文件夹并绑定
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={runAiPreprocess}
-                  disabled={aiBusy}
-                  className="flex items-center gap-1.5 rounded-lg bg-gradient-to-br from-brand to-brand-light px-4 py-2 text-[13px] font-medium text-white shadow-lg shadow-brand/30 transition hover:brightness-110 disabled:opacity-40 cursor-pointer"
-                >
-                  {aiBusy ? (
-                    <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white" />
-                  ) : (
-                    <Sparkles size={13} />
-                  )}
-                  {aiBusy ? '生成中…' : '生成参数'}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <AiPreprocessDialog
+        open={showAi}
+        onClose={() => setShowAi(false)}
+        onFillRows={applyAiRows}
+        onWriteFolder={writeAiRowsToFolder}
+      />
     </>
   );
 }
@@ -1469,45 +1179,6 @@ const ParamRows = memo(function ParamRows({
   );
 });
 
-const ResultTable = memo(function ResultTable({
-  results,
-  variables,
-}: {
-  results: BatchCallResult[];
-  variables: string[];
-}) {
-  return (
-    <>
-      {results.map((r) => {
-        const b = makeStatusBadge(r);
-        return (
-          <tr
-            key={r.index}
-            className="border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/20"
-          >
-            <td className="px-2 py-1.5 text-slate-400">{r.index + 1}</td>
-            <td
-              className="whitespace-nowrap px-2 py-1.5 text-slate-400"
-              title={new Date(r.sentAt).toLocaleString()}
-            >
-              {relTime(r.sentAt)}
-            </td>
-            <td className="px-2 py-1.5">
-              <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${b.cls}`}>{b.text}</span>
-            </td>
-            <td className="px-2 py-1.5 text-right text-slate-400">{r.durationMs}ms</td>
-            <td className="max-w-[180px] truncate px-2 py-1.5 text-slate-400">
-              {variables.map((v) => `${v}=${r.vars[v] ?? ''}`).join(' ')}
-            </td>
-            <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400">
-              {r.error ?? r.body?.slice(0, 120) ?? '-'}
-            </td>
-          </tr>
-        );
-      })}
-    </>
-  );
-});
 
 function KVEditorInline({
   value,

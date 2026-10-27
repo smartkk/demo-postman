@@ -35,7 +35,23 @@ function tmpFile(): string {
   return path.join(os.tmpdir(), `demo-postman-test-${Date.now()}-${Math.random().toString(16).slice(2)}.json`);
 }
 
+/**
+ * 启动代理并等待其真正开始监听。
+ * 首次启动要生成自签 CA（数百毫秒，机器忙时更久），固定 sleep 竞态会导致
+ * ECONNREFUSED 假失败；onReady 回调由 listen 成功触发，是确定性的就绪信号。
+ */
+async function startProxyReady(proxy: CaptureProxy): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('代理启动超时（10s）')), 10_000);
+    proxy.start(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 let passed = 0;
+let failed = 0;
 function test(name: string, fn: () => void) {
   fn();
   console.log('  \u2713', name);
@@ -706,8 +722,7 @@ async function testProxyCapture() {
   const store = new InterfaceStore(f);
   const caDir = path.join(os.tmpdir(), `demo-postman-ca-${Date.now()}`);
   const proxy = new CaptureProxy(19099, caDir, (i) => store.upsert(i));
-  proxy.start();
-  await new Promise((r) => setTimeout(r, 300));
+  await startProxyReady(proxy);
 
   await new Promise<void>((resolve, reject) => {
     const req = http.request(
@@ -743,9 +758,11 @@ async function testProxyCapture() {
 
 async function testExtensionReceiver() {
   const f = tmpFile();
+  const tokenFile = tmpFile();
   const store = new InterfaceStore(f);
   const receiver = new ExtensionReceiver(
     18991,
+    tokenFile,
     (i) => store.upsert(i),
     (_m, _u, _r) => store.upsertResponse(_m, _u, _r)
   );
@@ -760,12 +777,30 @@ async function testExtensionReceiver() {
     contentType: 'application/json',
   });
 
-  const res = await fetch('http://127.0.0.1:18991/api/capture', {
+  // 未携带 token 的写入必须被拒绝（本机其他程序防护）
+  const noTokenRes = await fetch('http://127.0.0.1:18991/api/capture', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload,
   });
-  assert.strictEqual(res.status, 200, '接收端点应返回 200');
+  assert.strictEqual(noTokenRes.status, 401, '缺少 token 应返回 401');
+  await new Promise((r) => setTimeout(r, 100));
+  assert.strictEqual(store.list().length, 0, '401 拒绝后不应记录任何接口');
+
+  const token = receiver.authToken;
+  assert.ok(token.length >= 16, 'token 应为足够长度的随机串');
+  assert.strictEqual(
+    fs.readFileSync(tokenFile, 'utf8').trim(),
+    token,
+    'token 应持久化到文件'
+  );
+
+  const res = await fetch('http://127.0.0.1:18991/api/capture', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-demo-token': token },
+    body: payload,
+  });
+  assert.strictEqual(res.status, 200, '携带正确 token 应返回 200');
   await new Promise((r) => setTimeout(r, 300));
 
   const list = store.list();
@@ -779,7 +814,7 @@ async function testExtensionReceiver() {
   // 重复发送同接口应去重（仅更新）
   await fetch('http://127.0.0.1:18991/api/capture', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'x-demo-token': token },
     body: JSON.stringify({
       method: 'POST',
       url: 'https://api.test/ext?token=abc',
@@ -794,6 +829,7 @@ async function testExtensionReceiver() {
 
   receiver.stop();
   fs.rmSync(f, { force: true });
+  fs.rmSync(tokenFile, { force: true });
 }
 
 async function testSendRequest() {
@@ -933,8 +969,7 @@ async function testProxyBodyLimit() {
   const store = new InterfaceStore(f);
   const caDir = path.join(os.tmpdir(), `demo-postman-ca-${Date.now()}`);
   const proxy = new CaptureProxy(19077, caDir, (i) => store.upsert(i));
-  proxy.start();
-  await new Promise((r) => setTimeout(r, 300));
+  await startProxyReady(proxy);
 
   // 3MB 请求体（> 2MB 上限）
   const big = 'x'.repeat(3 * 1024 * 1024);
@@ -996,52 +1031,35 @@ async function testProxyBodyLimit() {
   fs.rmSync(f, { force: true });
 }
 
+/**
+ * 运行一个异步测试组：失败记账但不中断后续用例，最终以退出码收尾。
+ * （曾经失败只打一行 ✗ 就返回 exit 0，CI 会“假绿”——失败必须让构建红。）
+ */
+async function runAsync(name: string, fn: () => Promise<void>) {
+  try {
+    await fn();
+    console.log('  \u2713', name);
+    passed++;
+  } catch (e) {
+    console.error('  \u2717', name + ':', e instanceof Error ? e.message : e);
+    failed++;
+  }
+}
+
 async function main() {
-  await testProxyCapture()
-    .then(() => {
-      console.log('  \u2713 代理成功捕获并去重记录 HTTP 请求');
-      passed++;
-    })
-    .catch((e) => {
-      console.error('  \u2717 代理捕获测试失败:', e?.message || e);
-    });
+  await runAsync('代理成功捕获并去重记录 HTTP 请求', testProxyCapture);
+  await runAsync('主进程成功发送 HTTP 请求并解析响应', testSendRequest);
+  await runAsync('插件接收端点成功捕获并去重记录请求', testExtensionReceiver);
+  await runAsync('批量调用并发受限、结果保序、占位符解析正确', testBatchRunner);
+  await runAsync(
+    '代理请求体超过 2MB 被丢弃、元信息保留，小请求体原样保留',
+    testProxyBodyLimit
+  );
 
-  await testSendRequest()
-    .then(() => {
-      console.log('  \u2713 主进程成功发送 HTTP 请求并解析响应');
-      passed++;
-    })
-    .catch((e) => {
-      console.error('  \u2717 发送请求测试失败:', e?.message || e);
-    });
-
-  await testExtensionReceiver()
-    .then(() => {
-      console.log('  \u2713 插件接收端点成功捕获并去重记录请求');
-      passed++;
-    })
-    .catch((e) => {
-      console.error('  \u2717 插件接收端点测试失败:', e?.message || e);
-    });
-
-  await testBatchRunner()
-    .then(() => {
-      console.log('  \u2713 批量调用并发受限、结果保序、占位符解析正确');
-      passed++;
-    })
-    .catch((e) => {
-      console.error('  \u2717 批量调用测试失败:', e?.message || e);
-    });
-
-  await testProxyBodyLimit()
-    .then(() => {
-      console.log('  \u2713 代理请求体超过 2MB 被丢弃、元信息保留，小请求体原样保留');
-      passed++;
-    })
-    .catch((e) => {
-      console.error('  \u2717 代理请求体上限测试失败:', e?.message || e);
-    });
-
+  if (failed > 0) {
+    console.error(`\n存在 ${failed} 项异步测试失败 ❌\n`);
+    return;
+  }
   console.log(`\n全部断言通过：核心 ${passed} 项 ✅\n`);
 }
 
@@ -1058,5 +1076,5 @@ main()
   })
   .finally(() => {
     clearTimeout(hardExit);
-    process.exit(0);
+    process.exit(failed > 0 ? 1 : 0);
   });

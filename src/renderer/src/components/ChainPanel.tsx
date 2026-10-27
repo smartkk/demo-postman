@@ -1,14 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useFolderCrud } from '../hooks/useFolderCrud';
-import { X, Play, Plus, Trash2, Layers, Save, FolderOpen, ArrowUp, ArrowDown, Download, Search, Eye } from 'lucide-react';
+import { X, Play, Plus, Trash2, Save, FolderOpen, ArrowUp, ArrowDown, Download, Search } from 'lucide-react';
 import { api } from '../api/client';
 import { Select } from './ui/Select';
-import { selectPreOnClick } from '../lib/select';
+import { KVEditorInline } from './KVEditorInline';
+import { ExtractEditor } from './ExtractEditor';
+import { ChainResultSection } from './ChainResultSection';
 import type {
   ChainProject,
   ChainRunResult,
   ChainStep,
-  InterfaceRecord,
+  InterfaceSummary,
 } from '../../../shared/types';
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
 
@@ -42,7 +44,7 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   const [activeStep, setActiveStep] = useState(0);
 
   // 本地已记录的接口，供「引入到链式步骤」
-  const [localRecords, setLocalRecords] = useState<InterfaceRecord[]>([]);
+  const [localRecords, setLocalRecords] = useState<InterfaceSummary[]>([]);
   const [showLocal, setShowLocal] = useState(false);
   const [localKw, setLocalKw] = useState('');
 
@@ -51,8 +53,7 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   const [error, setError] = useState('');
   const [viewResult, setViewResult] = useState<ChainRunResult | null>(null);
 
-  // ── 持久化 ──
-  const [projects, setProjects] = useState<ChainProject[]>([]);
+  // ── 持久化：文件夹分组 ──
   const { folders, setFolders } = useFolderCrud({
     listFolders: api.listChainFolders,
     createFolder: api.createChainFolder,
@@ -62,18 +63,20 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   const [folder, setFolder] = useState('');
 
   const refreshList = useCallback(async () => {
-    const [list, f] = await Promise.all([api.listChains(), api.listChainFolders()]);
-    setProjects(list);
+    const f = await api.listChainFolders();
     setFolders(f);
+    // setFolders 来自 useState，引用稳定，无需作为依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
     refreshList();
-    const off = api.onChains((list, f) => {
-      setProjects(list);
+    const off = api.onChains((_list, f) => {
       setFolders(f);
     });
     return off;
+    // setFolders 引用稳定；refreshList 已覆盖文件夹刷新路径
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshList]);
 
   // 根据左侧栏选中的任务加载编辑区
@@ -91,7 +94,6 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeId]);
 
   // 加载本地已记录的接口列表
@@ -110,7 +112,7 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   };
 
   // 将本地记录的接口引入为新的链式步骤（自动重建完整 URL，含 query）
-  const importFromLocal = (rec: InterfaceRecord) => {
+  const importFromLocal = (rec: InterfaceSummary) => {
     const qs = Object.entries(rec.query || {})
       .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
       .join('&');
@@ -153,11 +155,14 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
   };
 
   // 当编辑区改动，同步回当前激活步骤
+  // 故意只依赖编辑区字段：activeStep/steps 变化本身就会走 selectStep 的加载逻辑，
+  // 若纳入依赖，切换步骤时会把上一步的编辑内容回写到新选中的步骤上。
   useEffect(() => {
     if (steps[activeStep]) {
       updateStep(activeStep, { method, url, headers, body: body.trim() ? body : null, extract });
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }
+    // 见上方注释：activeStep/steps 刻意不入依赖
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [method, url, headers, body, extract]);
 
   const buildProject = (): Omit<ChainProject, 'id' | 'createdAt' | 'updatedAt'> => ({
@@ -281,42 +286,6 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
     setResults(null);
     setError('');
   };
-
-  const deleteProject = async (id: string) => {
-    await api.deleteChain(id);
-    if (loadedId === id) {
-      newProject();
-      onSelect(null);
-    }
-    await refreshList();
-  };
-
-  const statusBadge = (r: ChainRunResult) => {
-    if (r.error) return { text: '错误', cls: 'bg-red-500/20 text-red-400' };
-    if (r.status >= 200 && r.status < 400)
-      return { text: `${r.status}`, cls: 'bg-emerald-500/20 text-emerald-400' };
-    if (r.status >= 400)
-      return { text: `${r.status}`, cls: 'bg-yellow-500/20 text-yellow-400' };
-    return { text: `${r.status}`, cls: 'bg-slate-700 text-slate-400' };
-  };
-
-  // 美化 JSON 字符串，失败则原样返回
-  const prettyJson = (raw?: string | null) => {
-    if (!raw) return '';
-    try {
-      return JSON.stringify(JSON.parse(raw), null, 2);
-    } catch {
-      return raw;
-    }
-  };
-
-  // 结果详情分节小组件
-  const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-    <div>
-      <div className="mb-1 text-[11.5px] font-medium text-slate-400">{title}</div>
-      {children}
-    </div>
-  );
 
   const cur = steps[activeStep];
 
@@ -574,341 +543,14 @@ export function ChainPanel({ activeId, onSelect, onClose }: Props) {
 
           {/* 结果 */}
           {results && (
-            <div className="mt-4">
-              <div className="mb-1.5 flex items-center gap-2 text-[12px] font-medium text-slate-400">
-                执行结果（{results.length}/{steps.length} 步，
-                {results.filter((r) => !r.error && r.status >= 200 && r.status < 400).length} 成功 /
-                {results.filter((r) => r.error || r.status >= 400).length} 失败）
-              </div>
-              <div className="overflow-x-auto rounded-lg border border-slate-700/40">
-                <table className="w-full text-[11.5px]">
-                  <thead>
-                    <tr className="border-b border-slate-700/50 text-slate-400">
-                      <th className="px-2 py-1.5 text-left font-medium">#</th>
-                      <th className="px-2 py-1.5 text-left font-medium">步骤</th>
-                      <th className="px-2 py-1.5 text-left font-medium">状态</th>
-                      <th className="px-2 py-1.5 text-right font-medium">耗时</th>
-                      <th className="px-2 py-1.5 text-left font-medium">提取</th>
-                      <th className="px-2 py-1.5 text-left font-medium">响应</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((r) => {
-                      const b = statusBadge(r);
-                      return (
-                        <tr
-                          key={r.stepId + '-' + r.index}
-                          onClick={() => setViewResult(r)}
-                          title="点击查看完整请求 / 响应"
-                          className="cursor-pointer border-b border-slate-800/60 text-slate-300 transition hover:bg-slate-700/30"
-                        >
-                          <td className="px-2 py-1.5 text-slate-400">{r.index + 1}</td>
-                          <td className="px-2 py-1.5 text-slate-300">{r.name || r.stepId}</td>
-                          <td className="px-2 py-1.5">
-                            <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${b.cls}`}>
-                              {b.text}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-right text-slate-400">{r.durationMs}ms</td>
-                          <td className="max-w-[160px] truncate px-2 py-1.5 text-slate-400">
-                            {Object.entries(r.extracted).map(([k, v]) => `${k}=${v}`).join(' ') || '-'}
-                          </td>
-                          <td className="max-w-[200px] truncate px-2 py-1.5 text-slate-400">
-                            {r.error ?? r.body?.slice(0, 120) ?? '-'}
-                            <span className="ml-1 text-[10px] text-brand-light/70">查看 ›</span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* 单步结果详情抽屉 */}
-              {viewResult && (
-                <div className="mt-3 overflow-hidden rounded-xl border border-slate-700/50 bg-slate-800/40">
-                  <div className="flex items-center gap-2 border-b border-slate-700/50 px-3 py-2">
-                    <span className="text-[12px] font-medium text-slate-200">
-                      第 {viewResult.index + 1} 步 · {viewResult.name || viewResult.stepId}
-                    </span>
-                    <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] ${
-                        statusBadge(viewResult).cls
-                      }`}
-                    >
-                      {viewResult.error ? '错误' : viewResult.status || '-'}
-                    </span>
-                    <span className="text-[11px] text-slate-500">
-                      {viewResult.durationMs}ms · {viewResult.at}
-                    </span>
-                    <button
-                      onClick={() => setViewResult(null)}
-                      className="ml-auto rounded p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-100 cursor-pointer"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-
-                  <div className="max-h-[340px] space-y-3 overflow-y-auto p-3">
-                    {/* 实际请求 */}
-                    <Section title="实际发送请求">
-                      <div className="mb-1 font-mono text-[11.5px] text-brand-light">
-                        {viewResult.request.method}{' '}
-                        <span className="text-slate-300">{viewResult.request.url}</span>
-                      </div>
-                      {viewResult.request.headers &&
-                        Object.keys(viewResult.request.headers).length > 0 && (
-                          <div className="mb-1">
-                            <div className="mb-0.5 text-[11px] text-slate-500">Headers</div>
-                            <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
-                              {Object.entries(viewResult.request.headers)
-                                .map(([k, v]) => `${k}: ${v}`)
-                                .join('\n')}
-                            </pre>
-                          </div>
-                        )}
-                      {viewResult.request.body && (
-                        <div>
-                          <div className="mb-0.5 text-[11px] text-slate-500">Body</div>
-                          <pre onClick={selectPreOnClick} className="max-h-[160px] overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
-                            {prettyJson(viewResult.request.body)}
-                          </pre>
-                        </div>
-                      )}
-                      {!viewResult.request.body && (
-                        <div className="text-[11px] text-slate-500">（无请求体）</div>
-                      )}
-                    </Section>
-
-                    {/* 提取变量 */}
-                    <Section title="提取的变量">
-                      {Object.entries(viewResult.extracted).length > 0 ? (
-                        <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
-                          {Object.entries(viewResult.extracted)
-                            .map(([k, v]) => `${k} = ${v}`)
-                            .join('\n')}
-                        </pre>
-                      ) : (
-                        <div className="text-[11px] text-slate-500">（无提取变量）</div>
-                      )}
-                    </Section>
-
-                    {/* 响应 */}
-                    <Section title="响应">
-                      {viewResult.error ? (
-                        <pre onClick={selectPreOnClick} className="whitespace-pre-wrap break-all rounded-md bg-rose-500/10 p-2 font-mono text-[11px] text-rose-300">
-                          {viewResult.error}
-                        </pre>
-                      ) : viewResult.body ? (
-                        <pre onClick={selectPreOnClick} className="max-h-[200px] overflow-auto whitespace-pre-wrap break-all rounded-md bg-slate-900/50 p-2 font-mono text-[11px] text-slate-300">
-                          {prettyJson(viewResult.body)}
-                        </pre>
-                      ) : (
-                        <div className="text-[11px] text-slate-500">（无响应体）</div>
-                      )}
-                    </Section>
-                  </div>
-                </div>
-              )}
-            </div>
+            <ChainResultSection
+              results={results}
+              totalSteps={steps.length}
+              viewResult={viewResult}
+              onViewResult={setViewResult}
+            />
           )}
           </div>
       </div>
-  );
-}
-
-function ExtractEditor({
-  value,
-  onChange,
-  stepName,
-}: {
-  value: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
-  stepName: string;
-}) {
-  const [sample, setSample] = useState('');
-  const entries = Object.entries(value);
-  const setAt = (i: number, outKey: string, jsonPath: string) => {
-    const next: Record<string, string> = {};
-    entries.forEach(([k, v], idx) => {
-      if (idx === i) next[outKey] = jsonPath;
-      else next[k] = v;
-    });
-    onChange(next);
-  };
-  const add = () => onChange({ ...value, '': '' });
-  const remove = (k: string) => {
-    const next = { ...value };
-    delete next[k];
-    onChange(next);
-  };
-
-  // 预览：用示例响应实时解析每条路径（与主进程 getPath 逻辑一致，支持数组下标）
-  const tryParse = (() => {
-    try {
-      return sample.trim() ? JSON.parse(sample) : undefined;
-    } catch {
-      return null; // 解析失败标记
-    }
-  })();
-  const resolvePath = (obj: unknown, path: string): string | undefined => {
-    const tokens = path.match(/[^.[\]]+|\[\d+\]/g);
-    if (!tokens) return undefined;
-    let cur: any = obj;
-    for (const raw of tokens) {
-      if (cur == null) return undefined;
-      if (raw.startsWith('[')) {
-        const idx = parseInt(raw.slice(1, -1), 10);
-        if (!Array.isArray(cur) || idx < 0 || idx >= cur.length) return undefined;
-        cur = cur[idx];
-      } else {
-        cur = cur[raw];
-      }
-    }
-    if (cur == null) return undefined;
-    return typeof cur === 'object' ? JSON.stringify(cur) : String(cur);
-  };
-
-  return (
-    <div className="space-y-1.5">
-      {entries.map(([k, v], i) => (
-        <div key={i} className="flex items-center gap-2">
-          <input
-            value={k}
-            onChange={(e) => setAt(i, e.target.value, v)}
-            placeholder="输出变量名"
-            className="w-[35%] rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 font-mono text-[11.5px] outline-none focus:border-brand/60"
-          />
-          <span className="text-slate-500">→</span>
-          <input
-            value={v}
-            onChange={(e) => setAt(i, k, e.target.value)}
-            placeholder="JSON 路径，如 data.token 或 page.data.records[0].id"
-            className="flex-1 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 font-mono text-[11.5px] outline-none focus:border-brand/60"
-          />
-          <button
-            onClick={() => remove(k)}
-            className="text-slate-500 transition hover:text-rose-400 cursor-pointer"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ))}
-      <div className="text-[10.5px] text-slate-500">
-        提取后在后续步骤用{' '}
-        <code className="text-brand-light">
-          {'{{' + (stepName?.trim() || '本步骤名') + '.变量名}}'}
-        </code>{' '}
-        引用
-      </div>
-
-      {/* 提取预览：粘贴示例响应实时验证路径 */}
-      <div className="rounded-lg border border-slate-700/40 bg-slate-900/30 p-2">
-        <div className="mb-1 flex items-center gap-1 text-[11px] font-medium text-slate-400">
-          <Eye size={12} /> 提取预览（粘贴示例响应 JSON 实时验证）
-        </div>
-        <textarea
-          value={sample}
-          onChange={(e) => setSample(e.target.value)}
-          placeholder={'{\n  "page": { "data": { "records": [ { "id": "abc" } ] } }\n}'}
-          spellCheck={false}
-          rows={4}
-          className="w-full resize-y rounded border border-slate-700/50 bg-slate-800/40 p-2 font-mono text-[11px] outline-none focus:border-brand/60"
-        />
-        {sample.trim() !== '' && (
-          <div className="mt-1.5 space-y-1">
-            {tryParse === null ? (
-              <div className="text-[11px] text-rose-400">示例响应不是合法 JSON</div>
-            ) : entries.length === 0 ? (
-              <div className="text-[11px] text-slate-500">先添加提取规则</div>
-            ) : (
-              entries.map(([k, v]) => {
-                const p = k.trim() || '(未命名)';
-                const res = v.trim() ? resolvePath(tryParse, v.trim()) : undefined;
-                return (
-                  <div key={k} className="flex items-start gap-1.5 text-[11px]">
-                    <span className="shrink-0 font-mono text-brand-light">{'{{' + stepName + '.' + p + '}}'}</span>
-                    <span className="text-slate-500">=</span>
-                    {res === undefined ? (
-                      <span className="text-amber-400/80">路径未匹配：{v}</span>
-                    ) : (
-                      <span className="min-w-0 flex-1 break-all font-mono text-emerald-300">{res}</span>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
-        )}
-      </div>
-
-      <button
-        onClick={add}
-        className="flex items-center gap-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
-      >
-        <Plus size={12} /> 添加提取
-      </button>
-    </div>
-  );
-}
-
-function KVEditorInline({
-  value,
-  onChange,
-}: {
-  value: Record<string, string>;
-  onChange: (v: Record<string, string>) => void;
-}) {
-  const entries = Object.entries(value);
-  const setAt = (i: number, k: string, v: string) => {
-    const next: Record<string, string> = {};
-    entries.forEach(([ek, ev], idx) => {
-      if (idx === i) next[k] = v;
-      else next[ek] = ev;
-    });
-    onChange(next);
-  };
-  const setVal = (i: number, v: string) => {
-    const next: Record<string, string> = {};
-    entries.forEach(([ek, ev], idx) => (next[ek] = idx === i ? v : ev));
-    onChange(next);
-  };
-  const add = () => onChange({ ...value, '': '' });
-  const remove = (k: string) => {
-    const next = { ...value };
-    delete next[k];
-    onChange(next);
-  };
-  return (
-    <div className="space-y-1.5">
-      {entries.map(([k, v], i) => (
-        <div key={i} className="flex gap-2">
-          <input
-            value={k}
-            onChange={(e) => setAt(i, e.target.value, v)}
-            placeholder="Header"
-            className="w-1/3 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 font-mono text-[11.5px] outline-none focus:border-brand/60"
-          />
-          <input
-            value={v}
-            onChange={(e) => setVal(i, e.target.value)}
-            placeholder="值（可含 {{var}}）"
-            className="flex-1 rounded border border-slate-700/50 bg-slate-800/40 px-2 py-1 font-mono text-[11.5px] outline-none focus:border-brand/60"
-          />
-          <button
-            onClick={() => remove(k)}
-            className="text-slate-500 transition hover:text-rose-400 cursor-pointer"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ))}
-      <button
-        onClick={add}
-        className="flex items-center gap-1 text-[11px] text-slate-400 transition hover:text-slate-200 cursor-pointer"
-      >
-        <Plus size={12} /> 添加 Header
-      </button>
-    </div>
   );
 }

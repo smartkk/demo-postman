@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api/client';
-import type { CaptureInput, InterfaceRecord } from '../../../shared/types';
+import type { CaptureInput, InterfaceRecord, InterfaceSummary } from '../../../shared/types';
 
 export type SortKey = 'updated' | 'calls' | 'name' | 'method';
 export type StatusFilter = 'all' | 'success' | 'fail' | 'none';
@@ -8,9 +8,33 @@ export type StatusFilter = 'all' | 'success' | 'fail' | 'none';
 /** 搜索时每条记录的响应体最多参与匹配的字符数。 */
 const SEARCH_BODY_LIMIT = 2048;
 
+/**
+ * 选中记录的摘要是否发生变化（变化才刷新详情）。
+ * 抓取是高频路径：只有当前选中接口自身发生了变化才值得再拉一次完整记录，
+ * 否则每次别的接口被捕获都触发一次 getDetail，IPC 压力与列表推送同阶。
+ */
+function summaryChanged(
+  a: InterfaceSummary | undefined,
+  b: InterfaceSummary | undefined
+): boolean {
+  if (!a || !b) return true; // 新建 / 删除
+  return (
+    a.lastUpdated !== b.lastUpdated ||
+    a.callCount !== b.callCount ||
+    a.pinned !== b.pinned ||
+    a.name !== b.name ||
+    a.folder !== b.folder ||
+    a.lastSentAt !== b.lastSentAt ||
+    a.lastResponse?.status !== b.lastResponse?.status ||
+    a.lastResponse?.at !== b.lastResponse?.at
+  );
+}
+
 export function useInterfaces() {
-  const [list, setList] = useState<InterfaceRecord[]>([]);
+  const [list, setList] = useState<InterfaceSummary[]>([]);
   const [folders, setFolders] = useState<string[]>([]);
+  // 选中接口的完整记录（含未截断响应体与历史响应），按需拉取
+  const [detail, setDetail] = useState<InterfaceRecord | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [keyword, setKeyword] = useState('');
   // 过滤用的关键字（输入防抖后更新）：搜索需要对每条记录做字符串拼接，
@@ -21,14 +45,48 @@ export function useInterfaces() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // 最新选中 id / 列表的快照：供异步回调做竞态校验，避免过期响应覆盖新状态
+  const selectedIdRef = useRef<string | null>(null);
+  const listRef = useRef<InterfaceSummary[]>([]);
+
+  const fetchDetail = useCallback(async (id: string | null) => {
+    if (!id) {
+      setDetail(null);
+      return;
+    }
+    const r = await api.getDetail(id);
+    // 仅在仍是当前选中项时采用，防止快速切换选择时旧响应覆盖新记录
+    if (selectedIdRef.current === id) setDetail(r);
+  }, []);
+
   useEffect(() => {
-    api.getList().then(setList);
+    selectedIdRef.current = selectedId;
+  }, [selectedId]);
+
+  // 选中项变化（含取消选择）时拉取完整记录
+  useEffect(() => {
+    fetchDetail(selectedId);
+  }, [selectedId, fetchDetail]);
+
+  useEffect(() => {
+    api.getList().then((l) => {
+      listRef.current = l;
+      setList(l);
+    });
     api.listFolders().then(setFolders);
     api.onUpdated((l, f) => {
+      // 选中记录的摘要变了才刷新详情（抓取高频时避免反复拉全量记录）
+      const sel = selectedIdRef.current;
+      if (sel) {
+        const before = listRef.current.find((it) => it.id === sel);
+        const after = l.find((it) => it.id === sel);
+        if (summaryChanged(before, after)) fetchDetail(sel);
+      }
+      listRef.current = l;
       setList(l);
       setFolders(f);
     });
-  }, []);
+  }, [fetchDetail]);
 
   // 搜索防抖：输入框保持即时响应，只有实际过滤延迟执行
   useEffect(() => {
@@ -92,10 +150,14 @@ export function useInterfaces() {
     return api.exportCollection();
   }, []);
 
-  const importCollection = useCallback(async (data: unknown) => {
-    await api.importCollection(data);
-    setSelectedId(null);
-    setSelectedIds(new Set());
+  const importCollection = useCallback(async (data: unknown): Promise<boolean> => {
+    const ok = await api.importCollection(data);
+    // 仅在导入成功时清空选择；失败（形状不合法）时保留当前界面状态
+    if (ok) {
+      setSelectedId(null);
+      setSelectedIds(new Set());
+    }
+    return ok;
   }, []);
 
   const toggleSelect = useCallback((id: string) => {
@@ -111,7 +173,8 @@ export function useInterfaces() {
 
   const moveSelectedToFolder = useCallback(
     async (folder: string) => {
-      for (const id of selectedIds) await api.moveFolder(id, folder);
+      // 一次批量 IPC：逐个调用会让 N 条记录产生 N 次落盘调度 + N 次全量推送
+      await api.moveMany([...selectedIds], folder);
       setSelectedIds(new Set());
     },
     [selectedIds]
@@ -162,13 +225,15 @@ export function useInterfaces() {
     return arr;
   }, [list, queryKeyword, methodFilter, statusFilter, sort]);
 
-  const selected = list.find((it) => it.id === selectedId) || null;
+  // 选中记录的完整数据来自 getDetail（按需拉取），不再是列表里的裁剪版
+  const selected = detail;
 
   return {
     list,
     folders,
     filtered,
     selected,
+    detail,
     selectedId,
     setSelectedId,
     keyword,

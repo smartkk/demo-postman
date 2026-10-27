@@ -23,6 +23,7 @@ import type {
   ExtensionStatus,
   FolderFile,
   InterfaceRecord,
+  InterfaceSummary,
   ProxyStatus,
   RecordSource,
   ResponseRecord,
@@ -49,7 +50,12 @@ function readFolderFilesFromDisk(
   try {
     entries = fs.readdirSync(folder, { withFileTypes: true });
   } catch (err) {
-    throw new Error('无法读取文件夹：' + (err instanceof Error ? err.message : String(err)));
+    // ES2020 target 不支持 ErrorOptions（cause），这里显式挂载 cause 保留原始错误
+    const wrapped = new Error(
+      '无法读取文件夹：' + (err instanceof Error ? err.message : String(err))
+    );
+    (wrapped as Error & { cause?: unknown }).cause = err;
+    throw wrapped;
   }
   const names = entries
     .filter((d) => d.isFile())
@@ -113,7 +119,7 @@ export async function runChain(
   const getPath = (obj: unknown, path: string): string | undefined => {
     const tokens = path.match(/[^.[\]]+|\[\d+\]/g);
     if (!tokens) return undefined;
-    let cur: any = obj;
+    let cur: unknown = obj;
     for (const raw of tokens) {
       if (cur == null) return undefined;
       if (raw.startsWith('[')) {
@@ -121,7 +127,7 @@ export async function runChain(
         if (!Array.isArray(cur) || idx < 0 || idx >= cur.length) return undefined;
         cur = cur[idx];
       } else {
-        cur = cur[raw];
+        cur = (cur as Record<string, unknown>)[raw];
       }
     }
     if (cur == null) return undefined;
@@ -224,9 +230,11 @@ export function registerIpc(
   const extensionStatus = (): ExtensionStatus => ({
     running: extension.running,
     port: extension.portNumber,
+    token: extension.authToken,
   });
 
-  ipcMain.handle('store:list', (): InterfaceRecord[] => store.list());
+  // 列表只推摘要（响应体截断），详情页经 store:detail 按需拉取，避免全量记录高频序列化
+  ipcMain.handle('store:list', (): InterfaceSummary[] => store.listSummaries());
   ipcMain.handle('store:detail', (_e, id: string): InterfaceRecord | null =>
     store.get(id)
   );
@@ -253,6 +261,11 @@ export function registerIpc(
   );
   ipcMain.handle('store:moveFolder', (_e, id: string, folder: string): void =>
     store.moveFolder(id, folder)
+  );
+  // 批量移动：一次落盘 + 一次推送，替代渲染层逐个调用 moveFolder
+  ipcMain.handle(
+    'store:moveMany',
+    (_e, ids: string[], folder: string): number => store.moveMany(ids, folder)
   );
   ipcMain.handle('store:folders', (): string[] => store.listFolders());
   ipcMain.handle('store:createFolder', (_e, name: string): void =>
@@ -478,7 +491,16 @@ export function registerIpc(
   ipcMain.handle(
     'collection:import',
     (_e, data: unknown): boolean => {
-      store.importCollection(data as any);
+      // 导入会先清空现有数据：形状不合法时直接拒绝，避免脏 JSON 把整个集合清掉
+      const isValid =
+        Array.isArray(data) ||
+        (!!data &&
+          typeof data === 'object' &&
+          Array.isArray((data as { records?: unknown }).records));
+      if (!isValid) return false;
+      store.importCollection(
+        data as Parameters<InterfaceStore['importCollection']>[0]
+      );
       return true;
     }
   );
@@ -544,9 +566,9 @@ export function registerIpc(
     });
   }
 
-  // 存储变更时主动推送最新列表与分组到渲染进程
+  // 存储变更时主动推送最新列表与分组到渲染进程（摘要，响应体已截断）
   store.onChange(() => {
-    getWin()?.webContents.send('store:updated', store.list(), store.listFolders());
+    getWin()?.webContents.send('store:updated', store.listSummaries(), store.listFolders());
   });
 
   // 抓取设置（白名单 / 自动分组）

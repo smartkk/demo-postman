@@ -9,7 +9,7 @@ import type {
   ScheduleConfig,
   ScheduleRunResult,
   CaptureInput,
-  InterfaceRecord,
+  InterfaceSummary,
   ChainProject,
 } from '../../../shared/types';
 
@@ -21,7 +21,8 @@ import type {
  */
 
 interface Props {
-  records: InterfaceRecord[];
+  /** 接口列表摘要（只需 method/url/headers/query/body，无需完整记录） */
+  records: InterfaceSummary[];
   activeId: string | null;
   /** 新建完成后同步左侧栏选中态（App 的 activeIds.schedules） */
   onSelect?: (id: string) => void;
@@ -42,7 +43,7 @@ function genId(): string {
   return `sched_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function recordToInput(r: InterfaceRecord): CaptureInput {
+function recordToInput(r: InterfaceSummary): CaptureInput {
   return {
     method: r.method,
     url: r.url + (r.query && Object.keys(r.query).length

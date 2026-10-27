@@ -56,7 +56,7 @@ export async function preprocessWithAi(
       `AI 接口返回 ${res.status} ${res.statusText}：${res.body.slice(0, 200)}`
     );
   }
-  let content = '';
+  let content: string;
   try {
     const json = JSON.parse(res.body);
     content = String(json?.choices?.[0]?.message?.content ?? '');

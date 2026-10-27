@@ -176,6 +176,17 @@ body {
   color: #4f46e5 !important;
 }
 
+/* ── 品牌渐变：浅色下把两端加深，保证白字对比度 ──
+   默认 from-brand(#6366F1) → to-brand-light(#818CF8)，浅色端 #818CF8 上白字对比度不足；
+   浅色主题改为 #4F46E5 → #6366F1，两端均足以承载白字。 */
+.theme-light .from-brand {
+  --tw-gradient-from: #4f46e5 var(--tw-gradient-from-position) !important;
+  --tw-gradient-to: rgb(79 70 229 / 0) var(--tw-gradient-to-position) !important;
+}
+.theme-light .to-brand-light {
+  --tw-gradient-to: #6366f1 var(--tw-gradient-to-position) !important;
+}
+
 /* ── 语义色文本（method badge / status） ── */
 .theme-light .text-emerald-300 {
   color: #059669 !important;
@@ -264,6 +275,16 @@ body {
 }
 .theme-light .bg-amber-400\/30 {
   background-color: rgb(251 191 36 / 0.2) !important;
+}
+
+/* 绿色「执行 / 立即执行」按钮：bg-emerald-500/90 + 白字在浅色下对比度不足，加深背景 */
+.theme-light .bg-emerald-500\/90 {
+  background-color: #047857 !important;
+}
+
+/* 弹窗遮罩：浅色界面下纯黑半透明过于沉重，改为更通透的暗色叠加 */
+.theme-light .bg-slate-900\/70 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
 }
 
 /* ── 语义色边框 ── */

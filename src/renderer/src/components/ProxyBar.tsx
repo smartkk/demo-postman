@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Network, Sun, Moon, Clipboard } from 'lucide-react';
+import { Server, Plus, ShieldAlert, Puzzle, Settings, X, FolderOpen, Network, Sun, Moon, Clipboard, KeyRound } from 'lucide-react';
 import type { ExtensionStatus, ProxyStatus } from '../../../shared/types';
 import { api } from '../api/client';
 
@@ -21,6 +21,7 @@ export function ProxyBar({
   onSettings,
 }: Props) {
   const [caOpen, setCaOpen] = useState(false);
+  const [tokenOpen, setTokenOpen] = useState(false);
   const [light, setLight] = useState(
     () => localStorage.getItem('theme') === 'light'
   );
@@ -81,6 +82,17 @@ export function ProxyBar({
           <Puzzle size={14} className="shrink-0" />
           <span className="hidden sm:inline">{extStatus.running ? `插件端点 · :${extStatus.port}` : '插件端点已停'}</span>
         </button>
+
+        {extStatus.running && (
+          <button
+            onClick={() => setTokenOpen(true)}
+            title="查看插件鉴权 Token（需填写到浏览器扩展弹窗）"
+            className="flex shrink-0 items-center gap-1 rounded-lg bg-slate-700/40 px-2.5 py-1.5 text-[12px] font-medium text-slate-300 transition-all hover:bg-slate-700/60 cursor-pointer sm:px-3"
+          >
+            <KeyRound size={14} className="shrink-0" />
+            <span className="hidden lg:inline">插件 Token</span>
+          </button>
+        )}
 
         {status.running && (
           <button
@@ -178,6 +190,52 @@ export function ProxyBar({
                 <Clipboard size={13} /> 复制路径
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {tokenOpen && (
+        <div
+          data-select-scope
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-sm"
+          onClick={() => setTokenOpen(false)}
+        >
+          <div
+            className="glass w-[440px] max-w-[92vw] rounded-2xl border border-slate-700/50 p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="flex items-center gap-2 text-[15px] font-semibold text-slate-100">
+                <KeyRound size={16} className="text-sky-400" /> 插件鉴权 Token
+              </h2>
+              <button
+                onClick={() => setTokenOpen(false)}
+                className="rounded-md p-1 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200 cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-[12.5px] leading-relaxed text-slate-300">
+              浏览器扩展向桌面端发送抓取数据时，需要携带此 Token
+              （请求头 <code className="text-sky-300">x-demo-token</code>
+              ）。它可防止本机其他程序向插件端点写入伪造记录。
+            </p>
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-slate-700/50 bg-slate-900/50 p-2.5">
+              <code className="min-w-0 flex-1 break-all font-mono text-[12px] text-slate-200">
+                {extStatus.token}
+              </code>
+              <button
+                onClick={() => navigator.clipboard?.writeText(extStatus.token)}
+                title="复制 Token"
+                className="shrink-0 rounded-md p-1.5 text-slate-400 transition hover:bg-slate-700/50 hover:text-slate-200 cursor-pointer"
+              >
+                <Clipboard size={14} />
+              </button>
+            </div>
+            <p className="mt-3 text-[11.5px] leading-relaxed text-slate-500">
+              用法：打开扩展弹窗 → 填入「鉴权 Token」→ 保存。Token
+              持久化在本机数据目录，重装扩展后只需重新粘贴一次。
+            </p>
           </div>
         </div>
       )}

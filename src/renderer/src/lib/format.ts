@@ -65,7 +65,7 @@ export function syntaxHighlightJson(json: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
   return esc.replace(
-    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g,
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+-]?\d+)?)/g,
     (m) => {
       let cls = 'json-number';
       if (/^"/.test(m)) {

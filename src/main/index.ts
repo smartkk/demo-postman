@@ -10,6 +10,7 @@ import { Settings, bindSettingsInstance } from './settings';
 import { ScheduleManager } from './scheduler/scheduleManager';
 import { shouldCapture, hostnameOf } from './captureFilter';
 import { registerIpc, runChain } from './ipc/handlers';
+import type { CaptureInput, ResponseRecord } from '../shared/types';
 
 const PROXY_PORT = 8899;
 const EXTENSION_PORT = 8891;
@@ -88,6 +89,8 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      // 显式声明（Electron 31 默认即为 true）：防未来大版本默认值变化导致 renderer 逃逸沙箱
+      sandbox: true,
     },
   });
 
@@ -146,12 +149,12 @@ app.whenReady().then(() => {
   bindSettingsInstance(settings);
 
   // 抓取统一入口：先过白名单过滤，再按域名自动分组（仅新建记录）
-  const onCapture = (input: { url: string }) => {
+  const onCapture = (input: CaptureInput) => {
     if (!shouldCapture(input.url, settings.get())) return;
     const folder = settings.get().autoGroup ? hostnameOf(input.url) : '';
-    store.upsert(input as any, { folder });
+    store.upsert(input, { folder });
   };
-  const onResponse = (method: string, url: string, response: any) => {
+  const onResponse = (method: string, url: string, response: ResponseRecord) => {
     if (!shouldCapture(url, settings.get())) return;
     const folder = settings.get().autoGroup ? hostnameOf(url) : '';
     store.upsertResponse(method, url, response, { folder });
@@ -172,6 +175,7 @@ app.whenReady().then(() => {
   );
   extension = new ExtensionReceiver(
     EXTENSION_PORT,
+    path.join(dataDir, 'extension-token'),
     (input) => onCapture(input),
     (method, url, response) => onResponse(method, url, response)
   );

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CheckCircle2, Info, XCircle } from 'lucide-react';
+import { CheckCircle2, Info, XCircle } from 'lucide-react';
 
 export type ToastKind = 'info' | 'success' | 'error';
 
@@ -18,7 +18,6 @@ export function showToast(msg: string, kind: ToastKind = 'info') {
   listeners.forEach((fn) => fn(item));
   // 兜底：若没有 React 订阅者，至少打印到控制台，避免完全无声。
   if (listeners.size === 0) {
-    // eslint-disable-next-line no-console
     console[kind === 'error' ? 'error' : 'warn']('[toast]', msg);
   }
 }

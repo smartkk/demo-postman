@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useEffect, useRef, useState } from 'react';
 import {
   Search,
   Trash2,
@@ -19,7 +19,7 @@ import {
   Layers,
   Inbox,
 } from 'lucide-react';
-import type { InterfaceRecord } from '../../../shared/types';
+import type { InterfaceSummary } from '../../../shared/types';
 import { buildFolderBuckets } from '../utils/groupByFolder';
 import type {
   SortKey,
@@ -116,11 +116,92 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
 
   const manualCount = filtered.length - capturedCount;
 
-  const present = new Set(buckets.keys());
-  const customFolders = [...folders];
-  for (const f of customFolders) present.delete(f);
-  const extra = [...present].filter((f) => f !== '').sort();
-  const groupOrder = [...customFolders, ...extra, ''];
+  // memo 化：groupOrder 是 flatRows/rowTops 的依赖，每次渲染重建会让下游全量重算
+  const groupOrder = useMemo(() => {
+    const present = new Set(buckets.keys());
+    const custom = [...folders];
+    for (const f of custom) present.delete(f);
+    const extra = [...present].filter((f) => f !== '').sort();
+    return [...custom, ...extra, ''];
+  }, [folders, buckets]);
+
+  // ── 列表虚拟化（记录多时启用）──
+  // 记录上百后全量渲染 DOM 会明显卡顿（每条记录还带 hover 交互节点）。
+  // 把「分组头 + 记录行」摊平为定高行，只渲染滚动窗口 ± 缓冲区的行；
+  // 行高为估值（记录行含 mb-1 约 58px、分组头约 26px），微小误差由缓冲区吸收。
+  // 80 条以内走原样全量渲染：小列表没有性能问题，避免绝对定位带来回归风险。
+  const ITEM_ROW_H = 58;
+  const GROUP_ROW_H = 26;
+  const OVERSCAN = 8;
+  const VIRTUALIZE_THRESHOLD = 80;
+
+  type FlatRow =
+    | { kind: 'head'; key: string; group: string; count: number }
+    | { kind: 'item'; key: string; group: string; item: InterfaceSummary };
+
+  const virtualize = filtered.length > VIRTUALIZE_THRESHOLD;
+
+  const flatRows = useMemo<FlatRow[]>(() => {
+    if (!virtualize) return [];
+    const rows: FlatRow[] = [];
+    for (const f of groupOrder) {
+      const items = buckets.get(f);
+      if (!items || items.length === 0) continue;
+      const key = f === '' ? '__ungrouped__' : f;
+      rows.push({ kind: 'head', key: `head:${key}`, group: f, count: items.length });
+      if (!collapsed[key]) {
+        for (const it of items) {
+          rows.push({ kind: 'item', key: it.id, group: f, item: it });
+        }
+      }
+    }
+    return rows;
+  }, [virtualize, groupOrder, buckets, collapsed]);
+
+  // 每行的顶部偏移（单调递增，供二分定位滚动窗口）
+  const rowTops = useMemo(() => {
+    const tops = new Array<number>(flatRows.length + 1);
+    tops[0] = 0;
+    for (let i = 0; i < flatRows.length; i++) {
+      tops[i + 1] = tops[i] + (flatRows[i].kind === 'head' ? GROUP_ROW_H : ITEM_ROW_H);
+    }
+    return tops;
+  }, [flatRows]);
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewportH, setViewportH] = useState(480);
+
+  // 容器尺寸变化（窗口拉伸 / 侧栏拖拽）时更新视口高度；
+  // 首帧也要量，否则首屏窗口按 480 猜算会露出空白
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || !virtualize) return;
+    setViewportH(el.clientHeight);
+    const ro = new ResizeObserver(() => setViewportH(el.clientHeight));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [virtualize]);
+
+  const [winStart, winEnd] = useMemo(() => {
+    // 二分定位 y 所在行：rowTops[i+1] <= y < rowTops[i] 时行为 i
+    const findRow = (y: number) => {
+      let lo = 0;
+      let hi = flatRows.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (rowTops[mid + 1] <= y) lo = mid + 1;
+        else hi = mid;
+      }
+      return lo;
+    };
+    const first = findRow(scrollTop);
+    const last = findRow(scrollTop + viewportH);
+    return [
+      Math.max(0, first - OVERSCAN),
+      Math.min(flatRows.length, last + 1 + OVERSCAN),
+    ];
+  }, [flatRows, rowTops, scrollTop, viewportH]);
 
   const toggle = (key: string) =>
     setCollapsed((c) => ({ ...c, [key]: !c[key] }));
@@ -165,16 +246,20 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
     reader.onload = async () => {
       try {
         const data = JSON.parse(String(reader.result));
-        await importCollection(data);
-        showToast('集合导入成功', 'success');
-      } catch (e) {
+        const ok = await importCollection(data);
+        if (ok) {
+          showToast('集合导入成功', 'success');
+        } else {
+          showToast('导入失败：文件不是有效的集合（需为记录数组或含 records 字段的对象）', 'error');
+        }
+      } catch (_e) {
         showToast('导入失败：文件不是合法的集合 JSON', 'error');
       }
     };
     reader.readAsText(file);
   };
 
-  const renderItem = (it: InterfaceRecord) => {
+  const renderItem = (it: InterfaceSummary) => {
     const checked = selectedIds.has(it.id);
     const selected = selectedId === it.id;
     return (
@@ -259,6 +344,38 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
             title="删除该接口"
           >
             <Trash2 size={13} />
+          </span>
+        )}
+      </div>
+    );
+  };
+
+  /** 分组头（虚拟 / 非虚拟两条渲染路径共用）。 */
+  const renderGroupHeader = (f: string, count: number) => {
+    const isUngrouped = f === '';
+    const title = isUngrouped ? '未分组' : f;
+    const key = isUngrouped ? '__ungrouped__' : f;
+    const isCollapsed = collapsed[key];
+    return (
+      <div
+        className="flex cursor-pointer items-center gap-1 px-2 py-1.5 text-[11px] font-medium text-slate-400 transition hover:text-slate-200"
+        onClick={() => toggle(key)}
+      >
+        {isCollapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+        <span className="flex-1">{title}</span>
+        <span className="text-slate-600">{count}</span>
+        {!isUngrouped && (
+          <span
+            role="button"
+            tabIndex={0}
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfirm({ kind: 'folder', name: f });
+            }}
+            className="rounded p-0.5 text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
+            title="删除分组（接口移至未分组）"
+          >
+            <Trash2 size={12} />
           </span>
         )}
       </div>
@@ -488,55 +605,47 @@ export function Sidebar({ store, view, onChangeView, activeIds, onSelect }: Prop
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-        {filtered.length === 0 ? (
-          <div className="px-4 py-10 text-center text-[12px] leading-relaxed text-slate-500">
-            暂无接口记录
-            <br />
-            开启代理并访问接口，或点击右上角「手动录入」
+      {virtualize ? (
+        <div
+          ref={scrollRef}
+          className="min-h-0 flex-1 overflow-y-auto px-2 pb-3"
+          onScroll={(e) => {
+            setScrollTop(e.currentTarget.scrollTop);
+            setViewportH(e.currentTarget.clientHeight);
+          }}
+        >
+          {/* 撑出完整滚动高度，窗口内行用绝对定位绘制 */}
+          <div className="relative" style={{ height: rowTops[flatRows.length] }}>
+            {flatRows.slice(winStart, winEnd).map((row, i) => (
+              <div
+                key={row.key}
+                className="absolute left-0 right-0"
+                style={{ top: rowTops[winStart + i] }}
+              >
+                {row.kind === 'head' ? (
+                  renderGroupHeader(row.group, row.count)
+                ) : (
+                  renderItem(row.item)
+                )}
+              </div>
+            ))}
           </div>
-        ) : (
-          groupOrder.map((f) => {
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          {groupOrder.map((f) => {
             const items = buckets.get(f);
             if (!items || items.length === 0) return null;
-            const isUngrouped = f === '';
-            const title = isUngrouped ? '未分组' : f;
-            const key = isUngrouped ? '__ungrouped__' : f;
-            const isCollapsed = collapsed[key];
+            const key = f === '' ? '__ungrouped__' : f;
             return (
               <div key={key} className="mb-1">
-                <div
-                  className="flex cursor-pointer items-center gap-1 px-2 py-1.5 text-[11px] font-medium text-slate-400 transition hover:text-slate-200"
-                  onClick={() => toggle(key)}
-                >
-                  {isCollapsed ? (
-                    <ChevronRight size={13} />
-                  ) : (
-                    <ChevronDown size={13} />
-                  )}
-                  <span className="flex-1">{title}</span>
-                  <span className="text-slate-600">{items.length}</span>
-                  {!isUngrouped && (
-                    <span
-                      role="button"
-                      tabIndex={0}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirm({ kind: 'folder', name: f });
-                      }}
-                      className="rounded p-0.5 text-slate-500 transition hover:bg-rose-500/15 hover:text-rose-400 cursor-pointer"
-                      title="删除分组（接口移至未分组）"
-                    >
-                      <Trash2 size={12} />
-                    </span>
-                  )}
-                </div>
-                {!isCollapsed && items.map(renderItem)}
+                {renderGroupHeader(f, items.length)}
+                {!collapsed[key] && items.map(renderItem)}
               </div>
             );
-          })
-        )}
-      </div>
+          })}
+        </div>
+      )}
       </>
       )}
 

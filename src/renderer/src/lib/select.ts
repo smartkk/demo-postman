@@ -66,7 +66,7 @@ export function installSelectScope(): () => void {
     // 浏览器原生的「选中控件内文本」；否则以鼠标所在面板为准。
     // 否则会出现「焦点还留在响应区的搜索框，按 Ctrl+A 只选中那个空输入框」的情况。
     const ae = document.activeElement as HTMLElement | null;
-    if (isEditable(ae)) {
+    if (ae && isEditable(ae)) {
       if (!hovered || ae === hovered || ae.contains(hovered)) return;
     }
 

@@ -20,7 +20,6 @@ export function ScheduleList({ activeId, onSelect }: Props) {
     refresh();
     const off = api.onSchedules((list) => setSchedules(list));
     return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const deleteSchedule = async (id: string) => {

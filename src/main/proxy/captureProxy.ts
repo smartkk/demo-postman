@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 import { Proxy } from 'http-mitm-proxy';
+import type { MitmCtx } from 'http-mitm-proxy';
 import type { CaptureInput, ResponseRecord } from '../../shared/types';
 
 /**
@@ -39,6 +40,11 @@ function headersOf(raw: Record<string, unknown> | undefined): Record<string, str
   return out;
 }
 
+/** 取出 onRequest 时挂到 ctx 上的捕获上下文（可能尚未创建）。 */
+function captureOf(ctx: MitmCtx): CaptureCtx | undefined {
+  return ctx._capture as CaptureCtx | undefined;
+}
+
 /**
  * 把可能经过压缩的响应体还原为文本。
  * 代理层拿到的是传输态数据（常为 gzip / br），直接 toString 会得到乱码，
@@ -64,7 +70,7 @@ function decodeBody(buf: Buffer, contentEncoding: string): string {
  * HTTPS 通过自签 CA（MITM）解密；CA 证书位于 caDir/ca.pem，需被客户端信任。
  */
 export class CaptureProxy {
-  private proxy: any = null;
+  private proxy: Proxy | null = null;
   private port: number;
   private caDir: string;
   private onCapture: (input: CaptureInput) => void;
@@ -100,14 +106,19 @@ export class CaptureProxy {
     return this.proxy !== null;
   }
 
-  start(): void {
+  /**
+   * 启动代理。
+   * @param onReady 监听成功后的回调。首次启动会生成自签 CA（可能数百毫秒），
+   *                调用方需要确定「已开始监听」时应传此回调，而不是靠固定 sleep 猜。
+   */
+  start(onReady?: () => void): void {
     if (this.proxy) return;
     if (!fs.existsSync(this.caDir)) fs.mkdirSync(this.caDir, { recursive: true });
 
     const proxy = new Proxy();
     let listening = false;
 
-    proxy.onError((_ctx: any, err?: Error, errorKind?: string) => {
+    proxy.onError((_ctx: MitmCtx, err?: Error, errorKind?: string) => {
       // listen 的失败（典型是端口被占用的 EADDRINUSE）是异步抛出的，
       // 同步 try/catch 抓不到。未确认监听成功前出现的错误一律视为启动失败，
       // 回退状态，避免 UI 显示「已启动」而实际并未监听。
@@ -116,13 +127,13 @@ export class CaptureProxy {
         console.error('[proxy] 启动失败', errorKind, err?.message || err);
         return;
       }
-      const code = (err as any)?.code;
+      const code = (err as NodeJS.ErrnoException | undefined)?.code;
       if (code !== 'ECONNRESET' && code !== 'EPIPE') {
         console.error('[proxy] error', errorKind, err?.message || err);
       }
     });
 
-    proxy.onRequest((ctx: any, callback: (e?: Error | null) => void) => {
+    proxy.onRequest((ctx: MitmCtx, callback: (e?: Error | null) => void) => {
       const req = ctx.clientToProxyRequest;
       const method = (req.method || 'GET').toUpperCase();
       const host = (req.headers['host'] as string) || '';
@@ -147,13 +158,13 @@ export class CaptureProxy {
         respChunks: [],
         respSize: 0,
       };
-      (ctx as any)._capture = cap;
+      ctx._capture = cap;
       callback();
     });
 
     proxy.onRequestData(
-      (ctx: any, chunk: Buffer, callback: (e?: Error | null, c?: Buffer) => void) => {
-        const cap = (ctx as any)._capture as CaptureCtx | undefined;
+      (ctx: MitmCtx, chunk: Buffer, callback: (e?: Error | null, c?: Buffer) => void) => {
+        const cap = captureOf(ctx);
         if (cap) {
           cap.reqSize += chunk.length;
           if (cap.reqSize > MAX_CAPTURE_BODY) {
@@ -167,8 +178,8 @@ export class CaptureProxy {
       }
     );
 
-    proxy.onRequestEnd((ctx: any, callback: (e?: Error | null) => void) => {
-      const cap = (ctx as any)._capture as CaptureCtx | undefined;
+    proxy.onRequestEnd((ctx: MitmCtx, callback: (e?: Error | null) => void) => {
+      const cap = captureOf(ctx);
       if (cap) {
         const body = cap.reqChunks.length
           ? Buffer.concat(cap.reqChunks).toString('utf8')
@@ -185,8 +196,8 @@ export class CaptureProxy {
     });
 
     // ── 响应捕获：让走系统代理抓到的接口也能看到响应 ──
-    proxy.onResponse((ctx: any, callback: (e?: Error | null) => void) => {
-      const cap = (ctx as any)._capture as CaptureCtx | undefined;
+    proxy.onResponse((ctx: MitmCtx, callback: (e?: Error | null) => void) => {
+      const cap = captureOf(ctx);
       const res = ctx.serverToProxyResponse;
       if (cap && res) {
         cap.status = res.statusCode || 0;
@@ -197,8 +208,8 @@ export class CaptureProxy {
     });
 
     proxy.onResponseData(
-      (ctx: any, chunk: Buffer, callback: (e?: Error | null, c?: Buffer) => void) => {
-        const cap = (ctx as any)._capture as CaptureCtx | undefined;
+      (ctx: MitmCtx, chunk: Buffer, callback: (e?: Error | null, c?: Buffer) => void) => {
+        const cap = captureOf(ctx);
         if (cap && cap.respSize <= MAX_CAPTURE_BODY) {
           cap.respSize += chunk.length;
           cap.respChunks.push(chunk);
@@ -207,8 +218,8 @@ export class CaptureProxy {
       }
     );
 
-    proxy.onResponseEnd((ctx: any, callback: (e?: Error | null) => void) => {
-      const cap = (ctx as any)._capture as CaptureCtx | undefined;
+    proxy.onResponseEnd((ctx: MitmCtx, callback: (e?: Error | null) => void) => {
+      const cap = captureOf(ctx);
       if (cap && this.onResponse && cap.status) {
         const buf = cap.respChunks.length
           ? Buffer.concat(cap.respChunks)
@@ -226,9 +237,12 @@ export class CaptureProxy {
     });
 
     try {
-      proxy.listen({ port: this.port, sslCaDir: this.caDir }, () => {
+      // 显式绑定 127.0.0.1：库默认 host 为 "localhost"，在 Windows 上常解析为
+      // IPv6（::1）导致仅监听 v6，而界面提示用户配置 127.0.0.1 会被拒绝。
+      proxy.listen({ host: '127.0.0.1', port: this.port, sslCaDir: this.caDir }, () => {
         listening = true;
         console.log(`[proxy] 捕获代理已启动: 127.0.0.1:${this.port}`);
+        onReady?.();
       });
       this.proxy = proxy;
     } catch (err) {

@@ -79,6 +79,41 @@ export interface InterfaceRecord {
   lastSentAt?: string;
 }
 
+/**
+ * 列表摘要：InterfaceRecord 的裁剪版。
+ *
+ * 全量记录含单条最多 1MB 的响应体（captureProxy / sender 落盘前截断），
+ * 若每次 store 变更都全量推送，几百条记录就是几十 MB 的 IPC 消息。
+ * 列表 / 搜索 / 侧栏展示只需要状态与正文前几个 KB，详情页按需经
+ * store:detail 拉取完整记录（含全部历史响应）。
+ */
+export interface InterfaceSummary {
+  id: string;
+  method: string;
+  url: string;
+  host: string;
+  path: string;
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  body: string | null;
+  contentType: string | null;
+  createdAt: string;
+  lastUpdated: string;
+  callCount: number;
+  source: RecordSource;
+  name?: string;
+  folder?: string;
+  pinned?: boolean;
+  lastSentAt?: string;
+  /** 最近一次响应的精简版：状态信息 + 截断后的响应体（供列表展示与正文搜索）。 */
+  lastResponse: {
+    status: number;
+    statusText: string;
+    at: string;
+    body: string;
+  } | null;
+}
+
 export interface ResponseRecord {
   status: number;
   statusText: string;
@@ -106,6 +141,8 @@ export interface ProxyStatus {
 export interface ExtensionStatus {
   running: boolean;
   port: number;
+  /** 本地鉴权 token：扩展 POST 时需以 x-demo-token 头携带，防止本机其他程序写入。 */
+  token: string;
 }
 
 /** 定时调度配置：以固定间隔自动调用某个接口或链式任务。 */
@@ -299,4 +336,90 @@ export interface ChainRunResult {
   body: string;
   sentAt: string;
   at: string;
+}
+
+/**
+ * 渲染进程可用的主进程 API（preload 经 contextBridge 暴露为 window.api）。
+ *
+ * 单一声明处：preload 的实现与渲染进程 client.ts 均引用本接口，
+ * 新增 IPC 只需在此维护一份签名，避免两端手写不一致。
+ */
+export interface RendererApi {
+  // 列表走摘要（响应体截断），完整记录经 getDetail 按需拉取
+  getList: () => Promise<InterfaceSummary[]>;
+  getDetail: (id: string) => Promise<InterfaceRecord | null>;
+  addManual: (input: CaptureInput) => Promise<InterfaceRecord | null>;
+  update: (id: string, input: CaptureInput) => Promise<InterfaceRecord | null>;
+  duplicate: (id: string) => Promise<InterfaceRecord | null>;
+  deleteOne: (id: string) => Promise<boolean>;
+  deleteBySource: (source: RecordSource) => Promise<number>;
+  rename: (id: string, name: string) => Promise<void>;
+  moveFolder: (id: string, folder: string) => Promise<void>;
+  moveMany: (ids: string[], folder: string) => Promise<number>;
+  listFolders: () => Promise<string[]>;
+  createFolder: (name: string) => Promise<void>;
+  deleteFolder: (name: string) => Promise<void>;
+  togglePin: (id: string) => Promise<void>;
+  sendRequest: (id: string, input: CaptureInput) => Promise<ResponseRecord | null>;
+  cancelRequest: (id: string) => Promise<void>;
+  batchSend: (input: BatchCallInput, runId: string) => Promise<BatchCallResult[]>;
+  listBatches: () => Promise<BatchProject[]>;
+  saveBatch: (project: BatchProject) => Promise<BatchProject>;
+  deleteBatch: (id: string) => Promise<boolean>;
+  renameBatch: (id: string, name: string) => Promise<void>;
+  moveBatchFolder: (id: string, folder: string) => Promise<void>;
+  runBatch: (id: string, runId: string, skipIndexes?: number[]) => Promise<BatchCallResult[]>;
+  /** 中断一次批量执行（暂停）：返回是否命中正在执行的批次。 */
+  cancelBatch: (runId: string) => Promise<boolean>;
+  /** 保存/清除断点续跑进度（progress 传 null 表示清除）。 */
+  saveBatchProgress: (id: string, progress: BatchProgressState | null) => Promise<void>;
+  listBatchFolders: () => Promise<string[]>;
+  createBatchFolder: (name: string) => Promise<void>;
+  deleteBatchFolder: (name: string) => Promise<void>;
+  listChains: () => Promise<ChainProject[]>;
+  saveChain: (project: ChainProject) => Promise<ChainProject>;
+  deleteChain: (id: string) => Promise<boolean>;
+  renameChain: (id: string, name: string) => Promise<void>;
+  moveChainFolder: (id: string, folder: string) => Promise<void>;
+  runChain: (id: string) => Promise<ChainRunResult[]>;
+  listChainFolders: () => Promise<string[]>;
+  createChainFolder: (name: string) => Promise<void>;
+  deleteChainFolder: (name: string) => Promise<void>;
+  onChains: (cb: (list: ChainProject[], folders: string[]) => void) => (() => void);
+  onBatches: (cb: (list: BatchProject[], folders: string[]) => void) => (() => void);
+  /** 订阅批量执行进度：每完成一条请求推送一次。 */
+  onBatchProgress: (cb: (p: BatchProgress) => void) => (() => void);
+  exportCollection: () => Promise<unknown>;
+  importCollection: (data: unknown) => Promise<boolean>;
+  clearAll: () => Promise<boolean>;
+  getProxyStatus: () => Promise<ProxyStatus>;
+  toggleProxy: () => Promise<ProxyStatus>;
+  getCaPath: () => Promise<string | null>;
+  openCaDir: () => Promise<void>;
+  openExternal: (url: string) => Promise<void>;
+  getExtensionStatus: () => Promise<ExtensionStatus>;
+  toggleExtension: () => Promise<ExtensionStatus>;
+  getSettings: () => Promise<CaptureSettings>;
+  setSettings: (patch: Partial<CaptureSettings>) => Promise<CaptureSettings>;
+  /* ── AI 预处理 & 文件夹参数 ── */
+  aiPreprocess: (req: { data: string; instruction?: string }) => Promise<AiPreprocessResult>;
+  pickFolder: () => Promise<string | null>;
+  readFolderFiles: (folder: string) => Promise<{ files: FolderFile[]; skipped: string[] }>;
+  writeParamFolder: (rows: Record<string, string>[]) => Promise<{ folder: string; count: number }>;
+  getDataDir: () => Promise<string>;
+  chooseDataDir: () => Promise<string | null>;
+  setDataDir: (dir: string) => Promise<boolean>;
+  relaunch: () => Promise<void>;
+  onUpdated: (cb: (list: InterfaceSummary[], folders: string[]) => void) => (() => void);
+  onProxyStatus: (cb: (s: ProxyStatus) => void) => (() => void);
+  onExtensionStatus: (cb: (s: ExtensionStatus) => void) => (() => void);
+  onSettings: (cb: (s: CaptureSettings) => void) => (() => void);
+  /* ── 定时调度 ── */
+  listSchedules: () => Promise<ScheduleConfig[]>;
+  saveSchedule: (config: ScheduleConfig) => Promise<ScheduleConfig[]>;
+  deleteSchedule: (id: string) => Promise<boolean>;
+  toggleSchedule: (id: string) => Promise<ScheduleConfig | undefined>;
+  getScheduleHistory: (id: string) => Promise<ScheduleConfig['history']>;
+  runSchedule: (id: string) => Promise<ScheduleRunResult | null>;
+  onSchedules: (cb: (list: ScheduleConfig[]) => void) => (() => void);
 }

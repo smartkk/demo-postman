@@ -89,6 +89,8 @@
     <div class="section">
       <label class="field">接收端点（桌面端插件端点）</label>
       <input class="text" id="endpoint" placeholder="http://127.0.0.1:8891" />
+      <label class="field" style="margin-top:8px;">鉴权 Token（桌面端 ProxyBar「插件 Token」按钮获取）</label>
+      <input class="text" id="token" placeholder="粘贴桌面端显示的 Token" />
     </div>
 
     <div class="section">
@@ -118,7 +120,8 @@
 
     <p class="hint">
       在桌面端开启「插件端点」后，本扩展会自动把浏览器发出的请求记录到 Demo
-      Postman。端点地址需与桌面端一致。
+      Postman。端点地址需与桌面端一致；并填写桌面端 ProxyBar
+      「插件 Token」按钮中的鉴权 Token。
     </p>
 
     <script src="popup.js"></script>

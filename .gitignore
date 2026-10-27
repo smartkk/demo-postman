@@ -16,6 +16,7 @@ inst_status.txt
 
 # 本地 Agent 会话/记忆数据（不入库）
 .workbuddy-ai/
+.workbuddy/
 
 # 本地调试/构建临时输出
 _build.txt

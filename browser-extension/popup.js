@@ -12,6 +12,7 @@ const excludeHostsEl = document.getElementById('excludeHosts');
 const addMethodEl = document.getElementById('addMethod');
 const addUrlEl = document.getElementById('addUrl');
 const addBtnEl = document.getElementById('addBtn');
+const tokenEl = document.getElementById('token');
 const addStatusEl = document.getElementById('addStatus');
 
 function setStatus(enabled, reachable) {
@@ -53,13 +54,14 @@ function renderStats() {
 
 async function load() {
   chrome.storage.local.get(
-    ['endpoint', 'enabled', 'excludeStatic', 'includeHosts', 'excludeHosts', 'capturedCount', 'lastCapturedUrl'],
+    ['endpoint', 'enabled', 'excludeStatic', 'includeHosts', 'excludeHosts', 'token', 'capturedCount', 'lastCapturedUrl'],
     async (s) => {
       enabledEl.checked = s.enabled !== false;
       endpointEl.value = s.endpoint || DEFAULT_ENDPOINT;
       excludeStaticEl.checked = s.excludeStatic !== false;
       includeHostsEl.value = s.includeHosts || '';
       excludeHostsEl.value = s.excludeHosts || '';
+      tokenEl.value = s.token || '';
       renderStats();
       const reachable = await checkReachable(endpointEl.value);
       setStatus(enabledEl.checked, reachable);
@@ -83,6 +85,11 @@ endpointEl.addEventListener('change', async () => {
 
 excludeStaticEl.addEventListener('change', async () => {
   await chrome.storage.local.set({ excludeStatic: excludeStaticEl.checked });
+});
+
+tokenEl.addEventListener('change', async () => {
+  await chrome.storage.local.set({ token: tokenEl.value.trim() });
+  setAddStatus('Token 已保存', true);
 });
 
 includeHostsEl.addEventListener('change', async () => {
@@ -112,16 +119,21 @@ addBtnEl.addEventListener('click', async () => {
   }
   const method = addMethodEl.value;
   const endpoint = endpointEl.value.trim() || DEFAULT_ENDPOINT;
+  const token = tokenEl.value.trim();
   setAddStatus('发送中…', true);
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers['x-demo-token'] = token;
     const res = await fetch(endpoint.replace(/\/+$/, '') + '/api/capture', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ method, url, headers: {}, body: null, contentType: null }),
     });
     if (res.ok) {
       setAddStatus('已添加到桌面端', true);
       addUrlEl.value = '';
+    } else if (res.status === 401) {
+      setAddStatus('鉴权失败：请填写桌面端「插件 Token」弹窗中的 Token', false);
     } else {
       setAddStatus('添加失败（端点返回 ' + res.status + '）', false);
     }

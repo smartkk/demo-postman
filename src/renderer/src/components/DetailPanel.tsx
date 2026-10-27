@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Copy, ServerCrash, Check, X, Send, Trash2, Folder, Star, Ban } from 'lucide-react';
+import { Copy, ServerCrash, Check, X, Send, Trash2, Folder, Star, Ban, Loader2 } from 'lucide-react';
 import type { CaptureInput, InterfaceRecord, ResponseRecord } from '../../../shared/types';
 import { relTime } from './method';
 import { api } from '../api/client';
@@ -48,6 +48,15 @@ function EmptyState() {
         ，经过的请求会被自动记录。同一接口只会保留一条记录，并始终更新为最新参数。
       </p>
     </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <main className="flex flex-1 flex-col items-center justify-center bg-[#0F172A] text-slate-500">
+      <Loader2 size={22} className="mb-3 animate-spin" />
+      <span className="text-[12.5px]">正在加载接口详情…</span>
+    </main>
   );
 }
 
@@ -109,8 +118,13 @@ export function DetailPanel({ record, store }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [record?.id]);
 
+  // 选中但详情尚未拉取完成时显示加载态，避免切换选择瞬间闪一下空状态
   if (!record) {
-    return <main className="flex flex-1 bg-[#0F172A]"><EmptyState /></main>;
+    return (
+      <main className="flex flex-1 bg-[#0F172A]">
+        {store.selectedId ? <LoadingState /> : <EmptyState />}
+      </main>
+    );
   }
 
   const saveEdit = async () => {

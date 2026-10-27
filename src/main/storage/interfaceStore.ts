@@ -5,6 +5,7 @@ import { FolderManager } from './folderManager';
 import type {
   CaptureInput,
   InterfaceRecord,
+  InterfaceSummary,
   RecordSource,
   ResponseRecord,
 } from '../../shared/types';
@@ -21,6 +22,10 @@ const EMIT_DEBOUNCE_MS = 200;
 const MAX_RESPONSES = 20;
 /** 落盘时单条响应体超过该大小则截断（避免 interfaces.json 膨胀）。 */
 const MAX_STORED_BODY = 1 * 1024 * 1024; // 1MB
+/** 列表摘要中响应体保留的字符数：搜索按正文查找只需前几个 KB。 */
+const SUMMARY_BODY_LIMIT = 2048;
+/** 列表摘要中请求体保留的字符数：请求体一般很小，留足余量防止手动粘贴超大 body 毒化每次推送。 */
+const SUMMARY_REQ_BODY_LIMIT = 256 * 1024;
 /** 需要脱敏的请求/响应头。 */
 const SENSITIVE_HEADERS = ['authorization', 'proxy-authorization', 'cookie'];
 
@@ -306,6 +311,45 @@ export class InterfaceStore {
     return this.listCache;
   }
 
+  /**
+   * 列表摘要（与 list() 同序）：响应体截断到 SUMMARY_BODY_LIMIT。
+   *
+   * store 变更推送、初次加载都走这里，避免把单条可达 1MB 的响应体
+   * 全量序列化进 IPC（详见 InterfaceSummary 注释）。详情页用 get(id) 取完整记录。
+   */
+  listSummaries(): InterfaceSummary[] {
+    return this.list().map((r) => ({
+      id: r.id,
+      method: r.method,
+      url: r.url,
+      host: r.host,
+      path: r.path,
+      headers: r.headers,
+      query: r.query,
+      body:
+        r.body && r.body.length > SUMMARY_REQ_BODY_LIMIT
+          ? r.body.slice(0, SUMMARY_REQ_BODY_LIMIT)
+          : r.body,
+      contentType: r.contentType,
+      createdAt: r.createdAt,
+      lastUpdated: r.lastUpdated,
+      callCount: r.callCount,
+      source: r.source,
+      name: r.name,
+      folder: r.folder,
+      pinned: r.pinned,
+      lastSentAt: r.lastSentAt,
+      lastResponse: r.lastResponse
+        ? {
+            status: r.lastResponse.status,
+            statusText: r.lastResponse.statusText,
+            at: r.lastResponse.at,
+            body: r.lastResponse.body.slice(0, SUMMARY_BODY_LIMIT),
+          }
+        : null,
+    }));
+  }
+
   /** 编辑已存在的接口：按 id 定位，保留 id/createdAt/callCount/name/folder/source，更新其余字段。 */
   update(id: string, input: CaptureInput): InterfaceRecord | null {
     let parsed: URL;
@@ -323,7 +367,6 @@ export class InterfaceStore {
     const host = parsed.host;
     const p = parsed.pathname || '/';
     const base = `${parsed.protocol}//${parsed.host}${p}`;
-    const search = parsed.search;
     const query: Record<string, string> = {};
     parsed.searchParams.forEach((v, k) => {
       query[k] = v;
@@ -426,6 +469,28 @@ export class InterfaceStore {
     this.emitChange();
   }
 
+  /**
+   * 批量移动到指定分组：一次 scheduleSave + 一次 emitChange。
+   * 逐个调用 moveFolder 会让 N 条记录的移动产生 N 次落盘调度与 N 次全量推送。
+   * @returns 实际移动的记录数。
+   */
+  moveMany(ids: string[], folder: string): number {
+    const now = new Date().toISOString();
+    let count = 0;
+    for (const id of ids) {
+      const r = this.records.get(id);
+      if (!r) continue;
+      r.folder = folder;
+      r.lastUpdated = now;
+      count++;
+    }
+    if (count) {
+      this.scheduleSave();
+      this.emitChange();
+    }
+    return count;
+  }
+
   /** 切换收藏（置顶）状态。 */
   togglePin(id: string): void {
     const r = this.records.get(id);
@@ -524,7 +589,7 @@ export class InterfaceStore {
     const p = parsed.pathname || '/';
     const key = this.buildKey(m, host, p, parsed.search);
 
-    let id = this.captureIndex.get(key);
+    const id = this.captureIndex.get(key);
     let record = id ? this.records.get(id) || null : null;
     if (!record) {
       // captureIndex 未命中（如记录是手动创建的、或去重键带了 query）时，

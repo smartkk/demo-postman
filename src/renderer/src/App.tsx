@@ -32,6 +32,7 @@ export default function App() {
   const [extStatus, setExtStatus] = useState<ExtensionStatus>({
     running: false,
     port: 8891,
+    token: '',
   });
   const [manualOpen, setManualOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -103,6 +104,9 @@ export default function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // store 是每次渲染新建的 hook 返回对象，写入依赖会导致快捷键监听器反复重绑；
+    // 其内部方法均为稳定引用，按挂载一次注册即可。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 全局复制兜底：只读区域未选中任何文本、且焦点不在可编辑元素时，
@@ -164,7 +168,7 @@ export default function App() {
         >
           <div className="absolute inset-y-0 -left-0.5 -right-0.5" />
         </div>
-        {view === 'interfaces' && <DetailPanel record={store.selected} store={store} />}
+        {view === 'interfaces' && <DetailPanel record={store.detail} store={store} />}
         {view === 'schedules' && (
           <SchedulePanel
             records={store.list}

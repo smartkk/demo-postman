@@ -23,7 +23,7 @@ const STATIC_EXT = new Set([
 function getSettings() {
   return new Promise((resolve) => {
     chrome.storage.local.get(
-      ['endpoint', 'enabled', 'excludeStatic', 'includeHosts', 'excludeHosts'],
+      ['endpoint', 'enabled', 'excludeStatic', 'includeHosts', 'excludeHosts', 'token'],
       (s) => {
         resolve({
           endpoint: (s.endpoint || DEFAULT_ENDPOINT).replace(/\/+$/, ''),
@@ -31,6 +31,7 @@ function getSettings() {
           excludeStatic: s.excludeStatic !== false, // 默认跳过静态资源
           includeHosts: parseList(s.includeHosts),
           excludeHosts: parseList(s.excludeHosts),
+          token: s.token || '', // 桌面端插件鉴权 Token（x-demo-token）
         });
       }
     );
@@ -117,16 +118,23 @@ async function bumpCount(url) {
   }
 }
 
-function sendCapture(endpoint, method, url, headers, body, contentType) {
+function sendCapture(endpoint, method, url, headers, body, contentType, token) {
   return fetch(endpoint + '/api/capture', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(token),
     body: JSON.stringify({ method, url, headers, body, contentType }),
   })
     .then(() => bumpCount(url))
     .catch(() => {
       // 桌面端未启动 / 端点未开启时静默忽略
     });
+}
+
+// 桌面端要求的鉴权头；未配置 token 时不发送（服务端会返回 401）
+function authHeaders(token) {
+  const h = { 'Content-Type': 'application/json' };
+  if (token) h['x-demo-token'] = token;
+  return h;
 }
 
 // ---------- DevTools 协议捕获 ----------
@@ -179,10 +187,10 @@ function b64ToUtf8(b64) {
 }
 
 // 把抓取到的响应结果回传桌面端（/api/capture-response）
-function sendResponse(endpoint, method, url, response) {
+function sendResponse(endpoint, method, url, response, token) {
   return fetch(endpoint + '/api/capture-response', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders(token),
     body: JSON.stringify({ method, url, response }),
   }).catch(() => {
     // 桌面端未启动 / 端点未开启时静默忽略
@@ -206,6 +214,7 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
     const contentType = headers['content-type'] || null;
     requests.set(params.requestId, {
       endpoint: settings.endpoint,
+      token: settings.token,
       method: req.method || 'GET',
       url: req.url,
       headers,
@@ -213,7 +222,15 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
       contentType,
       startTs: params.timestamp,
     });
-    sendCapture(settings.endpoint, req.method || 'GET', req.url, headers, body, contentType);
+    sendCapture(
+      settings.endpoint,
+      req.method || 'GET',
+      req.url,
+      headers,
+      body,
+      contentType,
+      settings.token
+    );
     return;
   }
 
@@ -257,7 +274,7 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
       body: bodyStr,
       durationMs,
       at: new Date().toISOString(),
-    });
+    }, r.token);
     requests.delete(params.requestId);
     return;
   }
@@ -271,7 +288,7 @@ chrome.debugger.onEvent.addListener(async (source, method, params) => {
       body: '',
       durationMs: 0,
       at: new Date().toISOString(),
-    });
+    }, r.token);
     requests.delete(params.requestId);
   }
 });

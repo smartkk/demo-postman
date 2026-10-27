@@ -1,193 +1,131 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
-  AiPreprocessResult,
-  BatchCallInput,
-  BatchCallResult,
   BatchProgress,
-  BatchProgressState,
   BatchProject,
-  CaptureInput,
   CaptureSettings,
   ChainProject,
-  ChainRunResult,
   ExtensionStatus,
-  FolderFile,
-  InterfaceRecord,
+  InterfaceSummary,
   ProxyStatus,
-  RecordSource,
-  ResponseRecord,
+  RendererApi,
   ScheduleConfig,
-  ScheduleRunResult,
 } from '../shared/types';
 
-const api = {
-  getList: (): Promise<InterfaceRecord[]> => ipcRenderer.invoke('store:list'),
-  getDetail: (id: string): Promise<InterfaceRecord | null> =>
-    ipcRenderer.invoke('store:detail', id),
-  addManual: (input: CaptureInput): Promise<InterfaceRecord | null> =>
-    ipcRenderer.invoke('store:add', input),
-  update: (id: string, input: CaptureInput): Promise<InterfaceRecord | null> =>
-    ipcRenderer.invoke('store:update', id, input),
-  duplicate: (id: string): Promise<InterfaceRecord | null> =>
-    ipcRenderer.invoke('store:duplicate', id),
-  deleteOne: (id: string): Promise<boolean> =>
-    ipcRenderer.invoke('store:delete', id),
-  deleteBySource: (source: RecordSource): Promise<number> =>
-    ipcRenderer.invoke('store:deleteBySource', source),
-  rename: (id: string, name: string): Promise<void> =>
-    ipcRenderer.invoke('store:rename', id, name),
-  moveFolder: (id: string, folder: string): Promise<void> =>
-    ipcRenderer.invoke('store:moveFolder', id, folder),
-  listFolders: (): Promise<string[]> => ipcRenderer.invoke('store:folders'),
-  createFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('store:createFolder', name),
-  deleteFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('store:deleteFolder', name),
-  togglePin: (id: string): Promise<void> =>
-    ipcRenderer.invoke('store:togglePin', id),
-  sendRequest: (id: string, input: CaptureInput): Promise<ResponseRecord | null> =>
-    ipcRenderer.invoke('request:send', id, input),
-  cancelRequest: (id: string): Promise<void> =>
-    ipcRenderer.invoke('request:cancel', id),
-  batchSend: (input: BatchCallInput, runId: string): Promise<BatchCallResult[]> =>
-    ipcRenderer.invoke('request:batchSend', input, runId),
-  listBatches: (): Promise<BatchProject[]> =>
-    ipcRenderer.invoke('batch:list'),
-  saveBatch: (project: BatchProject): Promise<BatchProject> =>
-    ipcRenderer.invoke('batch:save', project),
-  deleteBatch: (id: string): Promise<boolean> =>
-    ipcRenderer.invoke('batch:delete', id),
-  renameBatch: (id: string, name: string): Promise<void> =>
-    ipcRenderer.invoke('batch:rename', id, name),
-  moveBatchFolder: (id: string, folder: string): Promise<void> =>
-    ipcRenderer.invoke('batch:moveFolder', id, folder),
-  runBatch: (id: string, runId: string, skipIndexes?: number[]): Promise<BatchCallResult[]> =>
+/**
+ * 主进程 API 实现：方法签名统一由 shared/types.ts 的 RendererApi 约束，
+ * 新增 IPC 只需在该接口维护一份，避免 preload 与渲染进程双份手写不一致。
+ */
+const api: RendererApi = {
+  // 列表走摘要（响应体截断），完整记录经 getDetail 按需拉取
+  getList: () => ipcRenderer.invoke('store:list'),
+  getDetail: (id) => ipcRenderer.invoke('store:detail', id),
+  addManual: (input) => ipcRenderer.invoke('store:add', input),
+  update: (id, input) => ipcRenderer.invoke('store:update', id, input),
+  duplicate: (id) => ipcRenderer.invoke('store:duplicate', id),
+  deleteOne: (id) => ipcRenderer.invoke('store:delete', id),
+  deleteBySource: (source) => ipcRenderer.invoke('store:deleteBySource', source),
+  rename: (id, name) => ipcRenderer.invoke('store:rename', id, name),
+  moveFolder: (id, folder) => ipcRenderer.invoke('store:moveFolder', id, folder),
+  moveMany: (ids, folder) => ipcRenderer.invoke('store:moveMany', ids, folder),
+  listFolders: () => ipcRenderer.invoke('store:folders'),
+  createFolder: (name) => ipcRenderer.invoke('store:createFolder', name),
+  deleteFolder: (name) => ipcRenderer.invoke('store:deleteFolder', name),
+  togglePin: (id) => ipcRenderer.invoke('store:togglePin', id),
+  sendRequest: (id, input) => ipcRenderer.invoke('request:send', id, input),
+  cancelRequest: (id) => ipcRenderer.invoke('request:cancel', id),
+  batchSend: (input, runId) => ipcRenderer.invoke('request:batchSend', input, runId),
+  listBatches: () => ipcRenderer.invoke('batch:list'),
+  saveBatch: (project) => ipcRenderer.invoke('batch:save', project),
+  deleteBatch: (id) => ipcRenderer.invoke('batch:delete', id),
+  renameBatch: (id, name) => ipcRenderer.invoke('batch:rename', id, name),
+  moveBatchFolder: (id, folder) => ipcRenderer.invoke('batch:moveFolder', id, folder),
+  runBatch: (id, runId, skipIndexes) =>
     ipcRenderer.invoke('batch:run', id, runId, skipIndexes),
-  /** 中断一次批量执行（暂停）：返回是否命中正在执行的批次。 */
-  cancelBatch: (runId: string): Promise<boolean> =>
-    ipcRenderer.invoke('batch:cancel', runId),
-  /** 保存/清除断点续跑进度（progress 传 null 表示清除）。 */
-  saveBatchProgress: (id: string, progress: BatchProgressState | null): Promise<void> =>
+  // 中断一次批量执行（暂停）：返回是否命中正在执行的批次
+  cancelBatch: (runId) => ipcRenderer.invoke('batch:cancel', runId),
+  // 保存/清除断点续跑进度（progress 传 null 表示清除）
+  saveBatchProgress: (id, progress) =>
     ipcRenderer.invoke('batch:progress', id, progress),
-  listBatchFolders: (): Promise<string[]> =>
-    ipcRenderer.invoke('batch:folders'),
-  createBatchFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('batch:createFolder', name),
-  deleteBatchFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('batch:deleteFolder', name),
-  listChains: (): Promise<ChainProject[]> =>
-    ipcRenderer.invoke('chain:list'),
-  saveChain: (project: ChainProject): Promise<ChainProject> =>
-    ipcRenderer.invoke('chain:save', project),
-  deleteChain: (id: string): Promise<boolean> =>
-    ipcRenderer.invoke('chain:delete', id),
-  renameChain: (id: string, name: string): Promise<void> =>
-    ipcRenderer.invoke('chain:rename', id, name),
-  moveChainFolder: (id: string, folder: string): Promise<void> =>
-    ipcRenderer.invoke('chain:moveFolder', id, folder),
-  runChain: (id: string): Promise<ChainRunResult[]> =>
-    ipcRenderer.invoke('chain:run', id),
-  listChainFolders: (): Promise<string[]> =>
-    ipcRenderer.invoke('chain:folders'),
-  createChainFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('chain:createFolder', name),
-  deleteChainFolder: (name: string): Promise<void> =>
-    ipcRenderer.invoke('chain:deleteFolder', name),
-  onChains: (
-    cb: (list: ChainProject[], folders: string[]) => void
-  ): (() => void) => {
+  listBatchFolders: () => ipcRenderer.invoke('batch:folders'),
+  createBatchFolder: (name) => ipcRenderer.invoke('batch:createFolder', name),
+  deleteBatchFolder: (name) => ipcRenderer.invoke('batch:deleteFolder', name),
+  listChains: () => ipcRenderer.invoke('chain:list'),
+  saveChain: (project) => ipcRenderer.invoke('chain:save', project),
+  deleteChain: (id) => ipcRenderer.invoke('chain:delete', id),
+  renameChain: (id, name) => ipcRenderer.invoke('chain:rename', id, name),
+  moveChainFolder: (id, folder) => ipcRenderer.invoke('chain:moveFolder', id, folder),
+  runChain: (id) => ipcRenderer.invoke('chain:run', id),
+  listChainFolders: () => ipcRenderer.invoke('chain:folders'),
+  createChainFolder: (name) => ipcRenderer.invoke('chain:createFolder', name),
+  deleteChainFolder: (name) => ipcRenderer.invoke('chain:deleteFolder', name),
+  onChains: (cb) => {
     const handler = (_e: unknown, list: ChainProject[], folders: string[]) =>
       cb(list, folders);
     ipcRenderer.on('chain:updated', handler);
     return () => ipcRenderer.removeListener('chain:updated', handler);
   },
-  onBatches: (
-    cb: (list: BatchProject[], folders: string[]) => void
-  ): (() => void) => {
+  onBatches: (cb) => {
     const handler = (_e: unknown, list: BatchProject[], folders: string[]) =>
       cb(list, folders);
     ipcRenderer.on('batch:updated', handler);
     return () => ipcRenderer.removeListener('batch:updated', handler);
   },
-  /** 订阅批量执行进度：每完成一条请求推送一次。 */
-  onBatchProgress: (cb: (p: BatchProgress) => void): (() => void) => {
+  // 订阅批量执行进度：每完成一条请求推送一次
+  onBatchProgress: (cb) => {
     const handler = (_e: unknown, p: BatchProgress) => cb(p);
     ipcRenderer.on('batch:progress', handler);
     return () => ipcRenderer.removeListener('batch:progress', handler);
   },
-  exportCollection: (): Promise<unknown> =>
-    ipcRenderer.invoke('collection:export'),
-  importCollection: (data: unknown): Promise<boolean> =>
-    ipcRenderer.invoke('collection:import', data),
-  clearAll: (): Promise<boolean> => ipcRenderer.invoke('store:clear'),
-  getProxyStatus: (): Promise<ProxyStatus> =>
-    ipcRenderer.invoke('proxy:status'),
-  toggleProxy: (): Promise<ProxyStatus> => ipcRenderer.invoke('proxy:toggle'),
-  getCaPath: (): Promise<string | null> => ipcRenderer.invoke('proxy:caPath'),
-  openCaDir: (): Promise<void> => ipcRenderer.invoke('proxy:openCaDir'),
-  openExternal: (url: string): Promise<void> =>
-    ipcRenderer.invoke('app:openExternal', url),
-  getExtensionStatus: (): Promise<ExtensionStatus> =>
-    ipcRenderer.invoke('extension:status'),
-  toggleExtension: (): Promise<ExtensionStatus> =>
-    ipcRenderer.invoke('extension:toggle'),
-  getSettings: (): Promise<CaptureSettings> =>
-    ipcRenderer.invoke('settings:get'),
-  setSettings: (patch: Partial<CaptureSettings>): Promise<CaptureSettings> =>
-    ipcRenderer.invoke('settings:set', patch),
+  exportCollection: () => ipcRenderer.invoke('collection:export'),
+  importCollection: (data) => ipcRenderer.invoke('collection:import', data),
+  clearAll: () => ipcRenderer.invoke('store:clear'),
+  getProxyStatus: () => ipcRenderer.invoke('proxy:status'),
+  toggleProxy: () => ipcRenderer.invoke('proxy:toggle'),
+  getCaPath: () => ipcRenderer.invoke('proxy:caPath'),
+  openCaDir: () => ipcRenderer.invoke('proxy:openCaDir'),
+  openExternal: (url) => ipcRenderer.invoke('app:openExternal', url),
+  getExtensionStatus: () => ipcRenderer.invoke('extension:status'),
+  toggleExtension: () => ipcRenderer.invoke('extension:toggle'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (patch) => ipcRenderer.invoke('settings:set', patch),
   /* ── AI 预处理 & 文件夹参数 ── */
-  aiPreprocess: (req: { data: string; instruction?: string }): Promise<AiPreprocessResult> =>
-    ipcRenderer.invoke('ai:preprocess', req),
-  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('fs:pickFolder'),
-  readFolderFiles: (
-    folder: string
-  ): Promise<{ files: FolderFile[]; skipped: string[] }> =>
-    ipcRenderer.invoke('fs:readFolderFiles', folder),
-  writeParamFolder: (
-    rows: Record<string, string>[]
-  ): Promise<{ folder: string; count: number }> =>
-    ipcRenderer.invoke('fs:writeParamFolder', rows),
-  getDataDir: (): Promise<string> => ipcRenderer.invoke('app:getDataDir'),
-  chooseDataDir: (): Promise<string | null> =>
-    ipcRenderer.invoke('app:chooseDataDir'),
-  setDataDir: (dir: string): Promise<boolean> =>
-    ipcRenderer.invoke('app:setDataDir', dir),
-  relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
-  onUpdated: (cb: (list: InterfaceRecord[], folders: string[]) => void): (() => void) => {
-    const handler = (_e: unknown, list: InterfaceRecord[], folders: string[]) =>
+  aiPreprocess: (req) => ipcRenderer.invoke('ai:preprocess', req),
+  pickFolder: () => ipcRenderer.invoke('fs:pickFolder'),
+  readFolderFiles: (folder) => ipcRenderer.invoke('fs:readFolderFiles', folder),
+  writeParamFolder: (rows) => ipcRenderer.invoke('fs:writeParamFolder', rows),
+  getDataDir: () => ipcRenderer.invoke('app:getDataDir'),
+  chooseDataDir: () => ipcRenderer.invoke('app:chooseDataDir'),
+  setDataDir: (dir) => ipcRenderer.invoke('app:setDataDir', dir),
+  relaunch: () => ipcRenderer.invoke('app:relaunch'),
+  onUpdated: (cb) => {
+    const handler = (_e: unknown, list: InterfaceSummary[], folders: string[]) =>
       cb(list, folders);
     ipcRenderer.on('store:updated', handler);
     return () => ipcRenderer.removeListener('store:updated', handler);
   },
-  onProxyStatus: (cb: (s: ProxyStatus) => void): (() => void) => {
+  onProxyStatus: (cb) => {
     const handler = (_e: unknown, s: ProxyStatus) => cb(s);
     ipcRenderer.on('proxy:status', handler);
     return () => ipcRenderer.removeListener('proxy:status', handler);
   },
-  onExtensionStatus: (cb: (s: ExtensionStatus) => void): (() => void) => {
+  onExtensionStatus: (cb) => {
     const handler = (_e: unknown, s: ExtensionStatus) => cb(s);
     ipcRenderer.on('extension:status', handler);
     return () => ipcRenderer.removeListener('extension:status', handler);
   },
-  onSettings: (cb: (s: CaptureSettings) => void): (() => void) => {
+  onSettings: (cb) => {
     const handler = (_e: unknown, s: CaptureSettings) => cb(s);
     ipcRenderer.on('settings:updated', handler);
     return () => ipcRenderer.removeListener('settings:updated', handler);
   },
   /* ── 定时调度 ── */
-  listSchedules: (): Promise<ScheduleConfig[]> =>
-    ipcRenderer.invoke('schedule:list'),
-  saveSchedule: (config: ScheduleConfig): Promise<ScheduleConfig[]> =>
-    ipcRenderer.invoke('schedule:save', config),
-  deleteSchedule: (id: string): Promise<boolean> =>
-    ipcRenderer.invoke('schedule:delete', id),
-  toggleSchedule: (id: string): Promise<ScheduleConfig | undefined> =>
-    ipcRenderer.invoke('schedule:toggle', id),
-  getScheduleHistory: (id: string): Promise<ScheduleConfig['history']> =>
-    ipcRenderer.invoke('schedule:history', id),
-  runSchedule: (id: string): Promise<ScheduleRunResult | null> =>
-    ipcRenderer.invoke('schedule:runNow', id),
-  onSchedules: (cb: (list: ScheduleConfig[]) => void): (() => void) => {
+  listSchedules: () => ipcRenderer.invoke('schedule:list'),
+  saveSchedule: (config) => ipcRenderer.invoke('schedule:save', config),
+  deleteSchedule: (id) => ipcRenderer.invoke('schedule:delete', id),
+  toggleSchedule: (id) => ipcRenderer.invoke('schedule:toggle', id),
+  getScheduleHistory: (id) => ipcRenderer.invoke('schedule:history', id),
+  runSchedule: (id) => ipcRenderer.invoke('schedule:runNow', id),
+  onSchedules: (cb) => {
     const handler = (_e: unknown, list: ScheduleConfig[]) => cb(list);
     ipcRenderer.on('schedule:updated', handler);
     return () => ipcRenderer.removeListener('schedule:updated', handler);
